@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+  <meta name="description" content="A family document manager that stores PDFs and images in your Google Drive." />
+
+  <!-- iOS / PWA meta -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Family Docs" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- App icons -->
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png" />
+
+  <!-- iOS splash screens (basic — generated as a single fallback). -->
+  <link rel="apple-touch-startup-image" href="icons/splash.png" />
+
+  <title>Family Documents</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body class="theme-system">
+
+  <!-- ============================================
+       LOGIN SCREEN
+       ============================================ -->
+  <section id="screen-login" class="screen screen-login is-active">
+    <div class="login-card">
+      <div class="login-icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#5AC8FA"/>
+              <stop offset="100%" stop-color="#007AFF"/>
+            </linearGradient>
+          </defs>
+          <rect x="6" y="10" width="52" height="44" rx="10" fill="url(#lg)"/>
+          <rect x="14" y="20" width="36" height="3" rx="1.5" fill="#ffffff" opacity="0.95"/>
+          <rect x="14" y="28" width="28" height="3" rx="1.5" fill="#ffffff" opacity="0.7"/>
+          <rect x="14" y="36" width="32" height="3" rx="1.5" fill="#ffffff" opacity="0.5"/>
+          <rect x="14" y="44" width="20" height="3" rx="1.5" fill="#ffffff" opacity="0.35"/>
+        </svg>
+      </div>
+      <h1 class="login-title">Family Documents</h1>
+      <p class="login-subtitle">Keep every household document organized — securely stored in your own Google Drive.</p>
+
+      <button id="btn-google-signin" class="btn-google" type="button">
+        <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+          <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34.5 6.1 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
+          <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 19 13 24 13c3 0 5.8 1.1 7.9 3l5.7-5.7C34.5 6.1 29.5 4 24 4 16.3 4 9.6 8.3 6.3 14.7z"/>
+          <path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.4l-6.5-5.5C29.6 34.7 26.9 36 24 36c-5.2 0-9.6-3.3-11.2-7.9l-6.5 5C9.6 39.6 16.3 44 24 44z"/>
+          <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4 5.6l6.5 5.5C41.2 36.5 44 30.8 44 24c0-1.3-.1-2.4-.4-3.5z"/>
+        </svg>
+        <span>Sign in with Google</span>
+      </button>
+
+      <p class="login-fineprint">We only request access to a single folder we create for you, called <strong>“Family Documents Manager”</strong>. Nothing else in your Drive is read.</p>
+    </div>
+  </section>
+
+  <!-- ============================================
+       APP SHELL (dashboard / category / settings live inside)
+       ============================================ -->
+  <main id="app-shell" class="app-shell" hidden>
+
+    <!-- Pull-to-refresh indicator -->
+    <div id="ptr" class="ptr" aria-hidden="true">
+      <div class="ptr-spinner"></div>
+    </div>
+
+    <!-- ============================================
+         DASHBOARD
+         ============================================ -->
+    <section id="screen-dashboard" class="screen screen-dashboard is-active">
+      <header class="ios-header">
+        <div class="ios-header-row">
+          <div class="ios-header-spacer"></div>
+          <button id="btn-open-settings" class="icon-btn" type="button" aria-label="Settings">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </button>
+        </div>
+        <h1 class="ios-large-title">Documents</h1>
+        <div class="ios-search-wrap">
+          <div class="ios-search">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M21 21l-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <input id="dashboard-search" type="search" placeholder="Search across all documents" autocomplete="off" />
+          </div>
+        </div>
+      </header>
+
+      <div class="content">
+        <!-- Categories grid -->
+        <div id="categories-grid" class="categories-grid"></div>
+
+        <!-- Search results (hidden by default) -->
+        <div id="dashboard-search-results" class="search-results" hidden></div>
+
+        <button id="btn-add-category" class="add-category-btn" type="button">
+          <span class="plus">+</span>
+          <span>Add Category</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ============================================
+         CATEGORY DETAIL
+         ============================================ -->
+    <section id="screen-category" class="screen screen-category">
+      <header class="ios-header">
+        <div class="ios-header-row">
+          <button id="btn-back-from-category" class="back-btn" type="button">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Documents</span>
+          </button>
+          <div class="ios-header-spacer"></div>
+          <button id="btn-category-menu" class="icon-btn" type="button" aria-label="Category options">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <circle cx="5" cy="12" r="1.6" fill="currentColor"/>
+              <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
+              <circle cx="19" cy="12" r="1.6" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+        <h1 id="category-title" class="ios-large-title">Category</h1>
+
+        <!-- Filter chips -->
+        <div class="filter-row">
+          <div class="ios-search compact">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M21 21l-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <input id="category-search" type="search" placeholder="Search" autocomplete="off" />
+          </div>
+        </div>
+        <div class="chip-row" id="filter-chips">
+          <button class="chip is-active" data-filter-type="all" type="button">All</button>
+          <button class="chip" data-filter-type="pdf" type="button">PDF</button>
+          <button class="chip" data-filter-type="image" type="button">Images</button>
+          <button class="chip" data-filter-type="recent" type="button">Last 30 days</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div id="documents-list" class="documents-list"></div>
+        <div id="documents-empty" class="empty-state" hidden>
+          <div class="empty-icon">📄</div>
+          <h3>No documents yet</h3>
+          <p>Tap the upload button to add your first document.</p>
+        </div>
+      </div>
+
+      <!-- Floating upload button -->
+      <button id="btn-fab-upload" class="fab" type="button" aria-label="Upload document">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </section>
+
+    <!-- ============================================
+         SETTINGS
+         ============================================ -->
+    <section id="screen-settings" class="screen screen-settings">
+      <header class="ios-header">
+        <div class="ios-header-row">
+          <button id="btn-back-from-settings" class="back-btn" type="button">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+              <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Documents</span>
+          </button>
+        </div>
+        <h1 class="ios-large-title">Settings</h1>
+      </header>
+
+      <div class="content">
+        <!-- Account -->
+        <h2 class="group-label">Account</h2>
+        <div class="ios-group">
+          <div class="row">
+            <div class="row-label">
+              <div class="row-title" id="settings-user-email">—</div>
+              <div class="row-sub">Connected to Google Drive</div>
+            </div>
+          </div>
+          <div class="row row-action" id="row-signout">
+            <div class="row-label">
+              <div class="row-title danger">Sign out</div>
+            </div>
+            <div class="row-chevron">›</div>
+          </div>
+        </div>
+
+        <!-- Appearance -->
+        <h2 class="group-label">Appearance</h2>
+        <div class="ios-group">
+          <div class="row">
+            <div class="row-label"><div class="row-title">Theme</div></div>
+            <select id="theme-select" class="ios-select">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Categories -->
+        <h2 class="group-label">Categories</h2>
+        <div id="settings-categories" class="ios-group"></div>
+        <button id="btn-add-category-settings" class="row-button">+ Add Category</button>
+
+        <!-- About -->
+        <h2 class="group-label">About</h2>
+        <div class="ios-group">
+          <div class="row">
+            <div class="row-label">
+              <div class="row-title">Version</div>
+            </div>
+            <div class="row-value">1.0.0</div>
+          </div>
+          <div class="row row-action" id="row-storage-info">
+            <div class="row-label">
+              <div class="row-title">View in Google Drive</div>
+            </div>
+            <div class="row-chevron">›</div>
+          </div>
+        </div>
+
+        <p class="settings-foot">Your files live exclusively in your Google Drive folder<br/>“Family Documents Manager”.</p>
+      </div>
+    </section>
+
+    <!-- ============================================
+         BOTTOM NAVIGATION
+         ============================================ -->
+    <nav id="bottom-nav" class="bottom-nav">
+      <button class="nav-btn is-active" data-target="dashboard" type="button">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <rect x="14" y="3" width="7" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <rect x="3" y="14" width="7" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <rect x="14" y="14" width="7" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        </svg>
+        <span>Documents</span>
+      </button>
+      <button class="nav-btn" data-target="search" type="button">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <path d="M21 21l-4.3-4.3M11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Search</span>
+      </button>
+      <button class="nav-btn" data-target="settings" type="button">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+        <span>Settings</span>
+      </button>
+    </nav>
+  </main>
+
+  <!-- ============================================
+       UPLOAD BOTTOM SHEET
+       ============================================ -->
+  <div id="upload-sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close="upload-sheet"></div>
+    <div class="sheet-panel">
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title">Add Document</h3>
+      <p class="sheet-sub" id="upload-sheet-sub">Upload a PDF or photo to this category.</p>
+
+      <button id="btn-upload-file" class="sheet-action" type="button">
+        <span class="sheet-icon">📤</span>
+        <div class="sheet-action-text">
+          <strong>Upload from device</strong>
+          <small>PDF, JPG or PNG up to 25MB</small>
+        </div>
+      </button>
+
+      <button id="btn-pick-from-drive" class="sheet-action" type="button">
+        <span class="sheet-icon">☁️</span>
+        <div class="sheet-action-text">
+          <strong>Pick from Google Drive</strong>
+          <small>Choose an existing file</small>
+        </div>
+      </button>
+
+      <button id="btn-take-photo" class="sheet-action" type="button">
+        <span class="sheet-icon">📷</span>
+        <div class="sheet-action-text">
+          <strong>Take photo</strong>
+          <small>Use your camera</small>
+        </div>
+      </button>
+
+      <button class="sheet-cancel" data-close="upload-sheet" type="button">Cancel</button>
+
+      <input id="file-input" type="file" accept="application/pdf,image/jpeg,image/png" hidden />
+      <input id="camera-input" type="file" accept="image/*" capture="environment" hidden />
+    </div>
+  </div>
+
+  <!-- ============================================
+       ADD / RENAME CATEGORY SHEET
+       ============================================ -->
+  <div id="category-sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close="category-sheet"></div>
+    <div class="sheet-panel">
+      <div class="sheet-handle"></div>
+      <h3 class="sheet-title" id="category-sheet-title">New Category</h3>
+
+      <label class="sheet-label">Name</label>
+      <input id="category-name-input" class="sheet-input" type="text" placeholder="e.g. Travel Documents" maxlength="40" />
+
+      <label class="sheet-label">Icon</label>
+      <div id="category-icon-picker" class="icon-picker"></div>
+
+      <label class="sheet-label">Color</label>
+      <div id="category-color-picker" class="color-picker"></div>
+
+      <div class="sheet-buttons">
+        <button class="sheet-cancel" data-close="category-sheet" type="button">Cancel</button>
+        <button id="btn-save-category" class="sheet-primary" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================
+       CATEGORY ACTION SHEET (rename / delete)
+       ============================================ -->
+  <div id="category-actions-sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close="category-actions-sheet"></div>
+    <div class="sheet-panel sheet-panel-actions">
+      <div class="sheet-handle"></div>
+      <button id="btn-rename-category" class="sheet-action-row" type="button">Rename Category</button>
+      <button id="btn-delete-category" class="sheet-action-row danger" type="button">Delete Category</button>
+      <button class="sheet-cancel" data-close="category-actions-sheet" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ============================================
+       DOCUMENT VIEWER MODAL (full-screen)
+       ============================================ -->
+  <div id="viewer-modal" class="viewer" hidden>
+    <header class="viewer-header">
+      <button id="btn-close-viewer" class="viewer-btn" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div id="viewer-title" class="viewer-title">Document</div>
+      <div class="viewer-actions">
+        <button id="btn-download" class="viewer-btn" type="button" aria-label="Download">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button id="btn-delete-doc" class="viewer-btn" type="button" aria-label="Delete">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6h12z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+    <div id="viewer-body" class="viewer-body"></div>
+  </div>
+
+  <!-- ============================================
+       TOAST CONTAINER
+       ============================================ -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- ============================================
+       LOADING / UPLOAD PROGRESS OVERLAY
+       ============================================ -->
+  <div id="loader" class="loader" hidden>
+    <div class="loader-card">
+      <div class="loader-spinner"></div>
+      <div id="loader-text" class="loader-text">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Google Identity & API libraries -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+
+  <!-- App -->
+  <script src="app.js" defer></script>
+</body>
+</html>
