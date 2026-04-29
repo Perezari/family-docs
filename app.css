@@ -11,6 +11,17 @@
    layout-display value. */
 [hidden] { display: none !important; }
 
+/* When the login screen is active, paint the gradient on html + body too,
+   so any reveal beyond the screen element (iOS PWA safe-area, rubber-band
+   scroll, etc.) blends in seamlessly instead of showing a gray band. */
+html:has(.screen-login.is-active),
+body:has(.screen-login.is-active) {
+  background:
+    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.18), transparent 60%),
+    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.20), transparent 55%),
+    var(--bg);
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -623,7 +634,11 @@ body.theme-dark {
   left: 0; right: 0; bottom: 0;
   display: flex;
   justify-content: space-around;
-  padding: 6px 8px max(env(safe-area-inset-bottom), 6px);
+  /* Tight top, safe-area-aware bottom — matches iOS native tab bar.
+     The nav buttons themselves are short; bulk of bottom space is the
+     iOS home indicator safe-area, with the blurred bar background
+     extending into it (also iOS native behavior). */
+  padding: 4px 8px max(env(safe-area-inset-bottom), 4px);
   background: var(--bg-blur);
   -webkit-backdrop-filter: saturate(180%) blur(28px);
   backdrop-filter: saturate(180%) blur(28px);
@@ -638,13 +653,14 @@ body.theme-dark {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 8px 4px;
+  padding: 4px 4px 2px;
   color: var(--text-tertiary);
   font-size: 10px;
   font-weight: 500;
   cursor: pointer;
   transition: color 0.15s ease, transform 0.15s ease;
 }
+.nav-btn svg { width: 22px; height: 22px; }
 .nav-btn:active { transform: scale(0.92); }
 .nav-btn.is-active { color: var(--blue); }
 
