@@ -20,6 +20,9 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   text-rendering: optimizeLegibility;
 }
+/* Make html itself opaque with our base color so iOS PWA's safe-area
+   region (home bar) blends in seamlessly instead of showing white. */
+html { background: var(--bg); }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
                "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
@@ -29,8 +32,10 @@ body {
   color: var(--text);
   overflow: hidden;
   overscroll-behavior-y: none;
-  /* Safe-area-aware viewport sizing */
+  /* Use 100dvh so the viewport always fills the actual visible area on
+     iOS (handles the home-bar / dynamic toolbar correctly). */
   min-height: 100dvh;
+  height: 100dvh;
 }
 button { font-family: inherit; }
 input, select, textarea { font-family: inherit; font-size: inherit; }
@@ -172,7 +177,9 @@ body.theme-dark {
     var(--bg);
   align-items: center;
   justify-content: center;
+  /* Padding accommodates safe-area but the gradient fills edge-to-edge */
   padding: max(env(safe-area-inset-top), 24px) 24px max(env(safe-area-inset-bottom), 24px);
+  min-height: 100dvh;
 }
 .login-card {
   max-width: 380px;

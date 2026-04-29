@@ -23,7 +23,7 @@
 
   // App version — printed on load so we can verify the new code is actually
   // running and the browser hasn't served a stale cached copy.
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.3.0';
   console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
 
   // ===================================================================
@@ -234,17 +234,71 @@
   };
 
   // ===================================================================
-  // AUTH — Google Identity Services token client
+  // AUTH — Google Identity Services token client + redirect-flow fallback
   // ===================================================================
   const Auth = {
     tokenClient: null,
 
+    // Detect iOS standalone PWA mode. In this mode, GIS popups open in
+    // Safari (a different "browser") and never return — so we have to
+    // use the OAuth implicit redirect flow instead.
+    isStandalone() {
+      return (
+        window.navigator.standalone === true ||                  // iOS Safari home-screen PWA
+        window.matchMedia('(display-mode: standalone)').matches  // generic PWA
+      );
+    },
+
+    // Build the OAuth implicit-flow URL. The browser will navigate to
+    // accounts.google.com, the user authenticates, and Google redirects
+    // back to our origin with the token in the URL fragment:
+    //   https://our-origin/#access_token=...&expires_in=3600&...
+    buildRedirectUrl() {
+      const state = Math.random().toString(36).slice(2);
+      sessionStorage.setItem('fdm_oauth_state', state);
+      const params = new URLSearchParams({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        redirect_uri: window.location.origin + window.location.pathname,
+        response_type: 'token',
+        scope: CONFIG.SCOPES,
+        include_granted_scopes: 'true',
+        state: state,
+        prompt: 'consent'
+      });
+      return 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+    },
+
+    // Parse #access_token=...&... from the URL fragment after a redirect
+    // back from Google. Returns true if a token was successfully captured.
+    handleRedirectCallback() {
+      const hash = window.location.hash;
+      if (!hash || hash.length < 2) return false;
+      const params = new URLSearchParams(hash.slice(1));
+      const token = params.get('access_token');
+      const expiresIn = parseInt(params.get('expires_in') || '0', 10);
+      const returnedState = params.get('state');
+      if (!token) return false;
+
+      const expectedState = sessionStorage.getItem('fdm_oauth_state');
+      sessionStorage.removeItem('fdm_oauth_state');
+      if (expectedState && returnedState !== expectedState) {
+        console.warn('[Auth] OAuth state mismatch — ignoring callback');
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        return false;
+      }
+
+      State.accessToken = token;
+      State.tokenExpiresAt = Date.now() + (expiresIn - 60) * 1000;
+      Storage.set('accessToken', State.accessToken);
+      Storage.set('tokenExpiresAt', State.tokenExpiresAt);
+      // Clean the hash from the URL bar so a refresh doesn't re-trigger
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+      console.log('[Auth] captured token from redirect callback');
+      return true;
+    },
+
     // Wait for both gsi/client and gapi to load
     async waitForLibs() {
-      // Wait for Google Identity Services + base gapi loader to be present.
-      // We do NOT call gapi.client.init / load discovery docs because every
-      // Drive call in this app is a plain fetch() with our own Authorization
-      // header. The Picker module is loaded lazily when the user opens it.
       console.log('[Auth] waiting for google.accounts + gapi to load');
       await new Promise((resolve, reject) => {
         const start = Date.now();
@@ -253,8 +307,7 @@
           if (Date.now() - start > 10000) {
             return reject(new Error(
               'Google libraries did not load within 10s. ' +
-              'They may be blocked by Brave Shields, an ad-blocker, or your network. ' +
-              'Try disabling Shields for localhost (lion icon → Shields down) and reload.'
+              'They may be blocked by Brave Shields, an ad-blocker, or your network.'
             ));
           }
           setTimeout(check, 80);
@@ -272,6 +325,19 @@
       });
       State.gisReady = true;
       console.log('[Auth] token client ready');
+    },
+
+    // Sign-in entry point. Picks the best flow for the current environment:
+    //   - Standalone PWA → redirect (popup is broken on iOS standalone)
+    //   - Browser → GIS popup
+    async signIn() {
+      if (this.isStandalone()) {
+        console.log('[Auth] standalone PWA detected — using redirect flow');
+        window.location.href = this.buildRedirectUrl();
+        // Page will navigate; never returns.
+        return new Promise(() => {});
+      }
+      return this.requestToken(true);
     },
 
     // Request a fresh access token. If `prompt=''` (silent) the user is
@@ -1435,6 +1501,11 @@
       if (savedUser) State.user = savedUser;
       if (savedRoot) State.rootFolderId = savedRoot;
 
+      // Did we just come back from a redirect-flow OAuth roundtrip?
+      // The token will be in the URL hash. Capture it before doing
+      // anything else.
+      const cameFromRedirect = Auth.handleRedirectCallback();
+
       // Wait for Google libs to be ready
       try {
         await Auth.waitForLibs();
@@ -1443,12 +1514,15 @@
         return;
       }
 
-      // FAST PATH: if we have a persisted access token that hasn't expired
-      // yet, jump straight into the app. The token lives for ~1 hour so
-      // any refresh within that window is instant — no popup, no Google
-      // round-trip.
-      if (savedUser && Auth.restoreToken()) {
-        console.log('[Auth] restored persisted access token (still valid)');
+      // FAST PATH: if we have a valid persisted token (either freshly
+      // captured from the redirect callback, or restored from a previous
+      // session), jump straight into the app.
+      if (cameFromRedirect || (savedUser && Auth.restoreToken())) {
+        if (cameFromRedirect) {
+          console.log('[Auth] entering app via redirect-flow token');
+        } else {
+          console.log('[Auth] restored persisted access token (still valid)');
+        }
         try {
           await this._postSignIn();
           return;
@@ -1488,7 +1562,14 @@
         Loader.show('Signing in…');
         try {
           await Auth.waitForLibs();
-          await Auth.requestToken(true);
+          // Auth.signIn() picks the right flow:
+          //   - iOS PWA standalone → full-page redirect (browser navigates
+          //     to accounts.google.com; comes back here with the token in
+          //     the URL hash, captured by handleRedirectCallback on next load)
+          //   - Browser tab → GIS popup
+          await Auth.signIn();
+          // For the redirect path, the line above never returns (page
+          // navigates away), so this code only runs for the popup path.
           await this._postSignIn();
         } catch (err) {
           console.error(err);
