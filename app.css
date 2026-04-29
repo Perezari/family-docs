@@ -13,9 +13,10 @@
 
 /* When the login screen is active, paint the gradient on html + body too,
    so any reveal beyond the screen element (iOS PWA safe-area, rubber-band
-   scroll, etc.) blends in seamlessly instead of showing a gray band. */
-html:has(.screen-login.is-active),
-body:has(.screen-login.is-active) {
+   scroll, etc.) blends in seamlessly instead of showing a gray band.
+   Activated by the JS adding `body.login-active`. */
+html.login-active,
+body.login-active {
   background:
     radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.18), transparent 60%),
     radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.20), transparent 55%),

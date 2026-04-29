@@ -7,7 +7,7 @@
    • Other GETs                                           → stale-while-revalidate
    ===================================================================== */
 
-const VERSION = 'v1.3.1';
+const VERSION = 'v1.3.2';
 const SHELL_CACHE = `fdm-shell-${VERSION}`;
 const RUNTIME_CACHE = `fdm-runtime-${VERSION}`;
 

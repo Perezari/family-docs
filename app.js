@@ -23,7 +23,7 @@
 
   // App version — printed on load so we can verify the new code is actually
   // running and the browser hasn't served a stale cached copy.
-  const APP_VERSION = '1.3.1';
+  const APP_VERSION = '1.3.2';
   console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
 
   // ===================================================================
@@ -724,6 +724,13 @@
         if (el) el.classList.toggle('is-active', s === screenName);
       });
       this.activeScreen = screenName;
+      // Mark body+html when on the login screen so CSS can paint a matching
+      // gradient background outside the .screen element (covers iOS PWA
+      // safe-area + rubber-band reveal). Using a class is more reliable
+      // across browsers than CSS `:has()`.
+      const onLogin = (screenName === 'login');
+      document.documentElement.classList.toggle('login-active', onLogin);
+      document.body.classList.toggle('login-active', onLogin);
       // Leaving the category screen for elsewhere → reset the folder path
       // stack so a future openCategory starts from a clean state.
       if (screenName !== 'category') State.folderPath = [];
@@ -1485,6 +1492,11 @@
   // ===================================================================
   const App = {
     async init() {
+      // Login screen is the initial state — paint the gradient on body+html
+      // right away so there's no flash of plain gray during boot.
+      document.documentElement.classList.add('login-active');
+      document.body.classList.add('login-active');
+
       // UI subsystems
       Toast.init();
       Loader.init();
