@@ -23,7 +23,7 @@
 
   // App version — printed on load so we can verify the new code is actually
   // running and the browser hasn't served a stale cached copy.
-  const APP_VERSION = '1.1.2';
+  const APP_VERSION = '1.2.0';
   console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
 
   // ===================================================================
@@ -281,9 +281,6 @@
         if (!this.tokenClient) return reject(new Error('Auth not initialized'));
         // Safety timeout — if the popup is blocked or the user closes it
         // without GIS firing a callback, we fail loudly instead of hanging.
-        // Silent refresh gets a longer window because GIS sometimes takes
-        // up to ~12s to fail a hidden-iframe attempt in browsers with
-        // strict third-party-cookie policies (Brave, Safari).
         const timeoutMs = promptUser ? 90000 : 15000;
         const timer = setTimeout(() => {
           reject(new Error(
@@ -296,8 +293,16 @@
           clearTimeout(timer);
           if (resp.error) return reject(new Error(resp.error));
           State.accessToken = resp.access_token;
-          // expires_in seconds
+          // expires_in seconds. Refresh 60s early to avoid edge-of-expiry 401s.
           State.tokenExpiresAt = Date.now() + (resp.expires_in - 60) * 1000;
+          // Persist so the user stays signed in across page refreshes for
+          // the lifetime of the token (~1h). This is the same approach
+          // every SPA on localhost / GitHub Pages uses — there's no way
+          // to silently refresh an OAuth token from a static site without
+          // a backend, and storing the bearer token in localStorage is
+          // standard practice for limited-scope tokens like ours.
+          Storage.set('accessToken', State.accessToken);
+          Storage.set('tokenExpiresAt', State.tokenExpiresAt);
           resolve(resp);
         };
         try {
@@ -307,6 +312,30 @@
           reject(e);
         }
       });
+    },
+
+    // Restore a previously persisted token if it's still valid.
+    // Returns true on success.
+    restoreToken() {
+      const tok = Storage.get('accessToken');
+      const exp = Storage.get('tokenExpiresAt');
+      if (tok && exp && Date.now() < exp) {
+        State.accessToken = tok;
+        State.tokenExpiresAt = exp;
+        return true;
+      }
+      // Expired or missing — clear stale values
+      Storage.remove('accessToken');
+      Storage.remove('tokenExpiresAt');
+      return false;
+    },
+
+    // Forget the stored token (used on Sign out)
+    clearToken() {
+      State.accessToken = null;
+      State.tokenExpiresAt = 0;
+      Storage.remove('accessToken');
+      Storage.remove('tokenExpiresAt');
     },
 
     // Ensure we have a valid token, refresh silently if expired
@@ -340,12 +369,13 @@
       if (State.accessToken && google?.accounts?.oauth2) {
         try { google.accounts.oauth2.revoke(State.accessToken, () => {}); } catch {}
       }
-      State.accessToken = null;
-      State.tokenExpiresAt = 0;
+      this.clearToken();
       State.user = null;
       State.rootFolderId = null;
       State.categories = [];
       State.documents = {};
+      State.folderContents = {};
+      State.folderPath = [];
       // Clear cache (keep theme preference)
       Storage.remove('rootFolderId');
       Storage.remove('categories');
@@ -1413,12 +1443,26 @@
         return;
       }
 
-      // No silent token refresh: modern browsers block popups that aren't
-      // triggered by a user click, and GIS's hidden-iframe fallback only
-      // works in environments with permissive third-party cookies. Instead,
-      // if we recognize the user from a previous session, show them a
-      // "Continue as <email>" button — clicking it counts as a user
-      // gesture and lets the OAuth popup proceed without a hitch.
+      // FAST PATH: if we have a persisted access token that hasn't expired
+      // yet, jump straight into the app. The token lives for ~1 hour so
+      // any refresh within that window is instant — no popup, no Google
+      // round-trip.
+      if (savedUser && Auth.restoreToken()) {
+        console.log('[Auth] restored persisted access token (still valid)');
+        try {
+          await this._postSignIn();
+          return;
+        } catch (e) {
+          // Token might be revoked. Clear and fall through to login.
+          console.warn('[Auth] persisted token rejected by Drive — re-auth required:', e.message);
+          Auth.clearToken();
+        }
+      }
+
+      // SLOW PATH: token expired or missing. Show the login screen with a
+      // personalized "Continue as <email>" button so the user can re-auth
+      // with a single click (which counts as a user gesture and lets the
+      // OAuth popup open without being blocked).
       if (savedUser) {
         const btn = document.getElementById('btn-google-signin');
         const span = btn ? btn.querySelector('span') : null;
@@ -1430,6 +1474,7 @@
           switchAccount.hidden = false;
           switchAccount.onclick = () => {
             Storage.remove('user');
+            Auth.clearToken();
             location.reload();
           };
         }
