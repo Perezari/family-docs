@@ -23,6 +23,25 @@ body.login-active {
     var(--bg);
 }
 
+/* Defensive layer: a fixed full-screen pseudo-element painted *behind*
+   all content. Guarantees the gradient is visible edge-to-edge on every
+   browser, every PWA mode, every iOS quirk — even where html/body
+   background fails to paint into safe-area regions. */
+body.login-active::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.18), transparent 60%),
+    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.20), transparent 55%),
+    var(--bg);
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -183,13 +202,11 @@ body.theme-dark {
    LOGIN SCREEN
    ============================================================ */
 .screen-login {
-  background:
-    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.18), transparent 60%),
-    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.20), transparent 55%),
-    var(--bg);
+  /* Background is painted by body.login-active::before (fixed full-screen
+     layer). Keep this transparent so we don't double-up. */
+  background: transparent;
   align-items: center;
   justify-content: center;
-  /* Padding accommodates safe-area but the gradient fills edge-to-edge */
   padding: max(env(safe-area-inset-top), 24px) 24px max(env(safe-area-inset-bottom), 24px);
   min-height: 100dvh;
 }
@@ -635,11 +652,9 @@ body.theme-dark {
   left: 0; right: 0; bottom: 0;
   display: flex;
   justify-content: space-around;
-  /* Tight top, safe-area-aware bottom — matches iOS native tab bar.
-     The nav buttons themselves are short; bulk of bottom space is the
-     iOS home indicator safe-area, with the blurred bar background
-     extending into it (also iOS native behavior). */
-  padding: 4px 8px max(env(safe-area-inset-bottom), 4px);
+  /* Tight padding — the nav itself is short. Bottom uses safe-area to
+     leave room for iOS home indicator without pushing icons up. */
+  padding: 0 8px max(env(safe-area-inset-bottom), 6px);
   background: var(--bg-blur);
   -webkit-backdrop-filter: saturate(180%) blur(28px);
   backdrop-filter: saturate(180%) blur(28px);
@@ -653,15 +668,16 @@ body.theme-dark {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 4px 4px 2px;
+  justify-content: center;
+  gap: 1px;
+  padding: 6px 4px 4px;
   color: var(--text-tertiary);
   font-size: 10px;
   font-weight: 500;
   cursor: pointer;
   transition: color 0.15s ease, transform 0.15s ease;
 }
-.nav-btn svg { width: 22px; height: 22px; }
+.nav-btn svg { width: 24px; height: 24px; }
 .nav-btn:active { transform: scale(0.92); }
 .nav-btn.is-active { color: var(--blue); }
 
