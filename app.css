@@ -4,6 +4,13 @@
 
 /* ---- Reset ------------------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; }
+
+/* The browser's default [hidden] { display: none } has specificity 0,1,0 and
+   gets overridden by component rules like .viewer { display: flex }. Force it
+   to win so HTML's hidden attribute hides elements regardless of their
+   layout-display value. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
@@ -462,6 +469,51 @@ body.theme-dark {
   color: var(--text);
 }
 .doc-card:active { transform: scale(0.98); opacity: 0.85; }
+
+/* Folder rows shown above documents inside a category. Same shape as
+   doc-card but with a tinted folder glyph instead of a thumbnail. */
+.folder-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
+  cursor: pointer;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  color: var(--text);
+  animation: fadeUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.folder-card:active { transform: scale(0.98); opacity: 0.85; }
+.folder-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 122, 255, 0.10);
+  color: var(--blue);
+}
+.folder-info { flex: 1; min-width: 0; }
+.folder-name {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.folder-meta {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
 .doc-thumb {
   width: 56px;
   height: 56px;

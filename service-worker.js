@@ -7,7 +7,7 @@
    • Other GETs                                           → stale-while-revalidate
    ===================================================================== */
 
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const SHELL_CACHE = `fdm-shell-${VERSION}`;
 const RUNTIME_CACHE = `fdm-runtime-${VERSION}`;
 
@@ -52,6 +52,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
+  // 0. Only handle http(s). Browser extensions inject chrome-extension://
+  //    requests into the page scope which the Cache API can't store.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+
   // 1. Never cache Google APIs / auth — must be live every call
   const NETWORK_ONLY_HOSTS = [
     'googleapis.com',
@@ -73,7 +77,9 @@ self.addEventListener('fetch', (event) => {
           // Cache successful same-origin GETs in runtime cache
           if (res && res.status === 200 && res.type === 'basic') {
             const copy = res.clone();
-            caches.open(RUNTIME_CACHE).then((c) => c.put(req, copy));
+            caches.open(RUNTIME_CACHE)
+              .then((c) => c.put(req, copy))
+              .catch(() => { /* best-effort */ });
           }
           return res;
         }).catch(() => caches.match('./index.html'));
@@ -87,7 +93,9 @@ self.addEventListener('fetch', (event) => {
     caches.open(RUNTIME_CACHE).then((cache) =>
       cache.match(req).then((cached) => {
         const network = fetch(req).then((res) => {
-          if (res && res.status === 200) cache.put(req, res.clone());
+          if (res && res.status === 200) {
+            cache.put(req, res.clone()).catch(() => { /* best-effort */ });
+          }
           return res;
         }).catch(() => cached);
         return cached || network;

@@ -21,6 +21,11 @@
 (function () {
   'use strict';
 
+  // App version — printed on load so we can verify the new code is actually
+  // running and the browser hasn't served a stale cached copy.
+  const APP_VERSION = '1.1.0';
+  console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
+
   // ===================================================================
   // CONFIG
   // -------------------------------------------------------------------
@@ -29,21 +34,18 @@
   // ===================================================================
   const CONFIG = {
     // OAuth 2.0 Web Client ID
-    GOOGLE_CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
+    GOOGLE_CLIENT_ID: '351448430343-515k9hq0lvfqd34j1472m5d83nl6bkj8.apps.googleusercontent.com',
 
-    // API key (used by gapi.client + Picker)
-    GOOGLE_API_KEY: 'YOUR_GOOGLE_API_KEY',
+    // API key — used only by the Google Picker
+    GOOGLE_API_KEY: 'AIzaSyDqdlaquRDu8HRqXmD59ZSdX6V6Jp2Ls90',
 
     // App ID (Google Cloud project number) — used by Picker
-    GOOGLE_APP_ID: 'YOUR_GOOGLE_APP_ID',
+    GOOGLE_APP_ID: '351448430343',
 
-    // Scope — drive.file ONLY: per-file access for files the app creates
-    // or the user explicitly opens via the Picker. We never read other
-    // files in the user's Drive.
-    SCOPES: 'https://www.googleapis.com/auth/drive.file',
-
-    // Drive discovery doc for gapi.client
-    DISCOVERY_DOC: 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
+    // Scopes:
+    // - drive.file → per-file Drive access for files we create or are picked
+    // - openid email profile → so we can show the signed-in user's email/name
+    SCOPES: 'openid email profile https://www.googleapis.com/auth/drive.file',
 
     // Root folder created in user's Drive
     ROOT_FOLDER_NAME: 'Family Documents Manager',
@@ -78,8 +80,10 @@
     tokenExpiresAt: 0,
     rootFolderId: null,
     categories: [],             // [{ id, name, icon, color, folderId, count }]
-    currentCategoryId: null,
-    documents: {},              // { [categoryId]: [files] }
+    currentCategoryId: null,    // first item's id in folderPath (kept for legacy lookups)
+    folderPath: [],             // navigation stack: [{id, name, icon?, color?, isCategory}]
+    folderContents: {},         // { [folderId]: { folders: [...], files: [...] } }
+    documents: {},              // legacy alias kept in sync with folderContents[*].files
     currentFilter: { type: 'all', search: '' },
     dashboardSearch: '',
     pickerLoaded: false,
@@ -111,7 +115,8 @@
       if (!cached || !cached.ts) return null;
       if (Date.now() - cached.ts > ttl) return null;
       return cached.data;
-    }
+    },
+    removeCache(key) { this.remove(key); }
   };
 
   // ===================================================================
@@ -151,10 +156,24 @@
       this.count++;
       this.textEl.textContent = text;
       this.el.hidden = false;
+      // Watchdog: if the loader is up for more than 30s, force-hide it and
+      // surface a warning so we never trap the user behind a frozen overlay.
+      if (this._watchdog) clearTimeout(this._watchdog);
+      this._watchdog = setTimeout(() => {
+        if (!this.el.hidden) {
+          console.warn('[Loader] watchdog tripped — force hiding after 30s. Last text:', text);
+          this.count = 0;
+          this.el.hidden = true;
+          if (window.Toast) Toast.show('Something took too long — try again', 'error');
+        }
+      }, 30000);
     },
     hide() {
       this.count = Math.max(0, this.count - 1);
-      if (this.count === 0 && this.el) this.el.hidden = true;
+      if (this.count === 0 && this.el) {
+        this.el.hidden = true;
+        if (this._watchdog) { clearTimeout(this._watchdog); this._watchdog = null; }
+      }
     }
   };
 
@@ -198,21 +217,27 @@
 
     // Wait for both gsi/client and gapi to load
     async waitForLibs() {
-      await new Promise(resolve => {
+      // Wait for Google Identity Services + base gapi loader to be present.
+      // We do NOT call gapi.client.init / load discovery docs because every
+      // Drive call in this app is a plain fetch() with our own Authorization
+      // header. The Picker module is loaded lazily when the user opens it.
+      console.log('[Auth] waiting for google.accounts + gapi to load');
+      await new Promise((resolve, reject) => {
+        const start = Date.now();
         const check = () => {
-          if (window.google && window.google.accounts && window.gapi) resolve();
-          else setTimeout(check, 80);
+          if (window.google && window.google.accounts && window.gapi) return resolve();
+          if (Date.now() - start > 10000) {
+            return reject(new Error(
+              'Google libraries did not load within 10s. ' +
+              'They may be blocked by Brave Shields, an ad-blocker, or your network. ' +
+              'Try disabling Shields for localhost (lion icon → Shields down) and reload.'
+            ));
+          }
+          setTimeout(check, 80);
         };
         check();
       });
-      // Initialize gapi.client for Drive
-      await new Promise((resolve, reject) => {
-        gapi.load('client', { callback: resolve, onerror: reject });
-      });
-      await gapi.client.init({
-        apiKey: CONFIG.GOOGLE_API_KEY,
-        discoveryDocs: [CONFIG.DISCOVERY_DOC]
-      });
+      console.log('[Auth] google libs loaded');
       State.gapiReady = true;
 
       // Initialize the token client (no callback yet — set per-request)
@@ -222,6 +247,7 @@
         callback: () => {} // overridden per call
       });
       State.gisReady = true;
+      console.log('[Auth] token client ready');
     },
 
     // Request a fresh access token. If `prompt=''` (silent) the user is
@@ -229,15 +255,30 @@
     requestToken(promptUser = false) {
       return new Promise((resolve, reject) => {
         if (!this.tokenClient) return reject(new Error('Auth not initialized'));
+        // Safety timeout — if the popup is blocked or the user closes it
+        // without GIS firing a callback, we fail loudly instead of hanging.
+        const timeoutMs = promptUser ? 90000 : 8000;
+        const timer = setTimeout(() => {
+          reject(new Error(
+            promptUser
+              ? 'Sign-in popup did not respond within 90s. The popup may have been blocked — check the URL bar for a popup-blocked icon.'
+              : 'Silent token refresh timed out (8s).'
+          ));
+        }, timeoutMs);
         this.tokenClient.callback = (resp) => {
+          clearTimeout(timer);
           if (resp.error) return reject(new Error(resp.error));
           State.accessToken = resp.access_token;
           // expires_in seconds
           State.tokenExpiresAt = Date.now() + (resp.expires_in - 60) * 1000;
-          gapi.client.setToken({ access_token: resp.access_token });
           resolve(resp);
         };
-        this.tokenClient.requestAccessToken({ prompt: promptUser ? 'consent' : '' });
+        try {
+          this.tokenClient.requestAccessToken({ prompt: promptUser ? 'consent' : '' });
+        } catch (e) {
+          clearTimeout(timer);
+          reject(e);
+        }
       });
     },
 
@@ -250,13 +291,21 @@
 
     // Fetch the user's profile (name/email/picture) using the userinfo endpoint
     async fetchUserInfo() {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort('timeout'), 10000);
       try {
         const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: 'Bearer ' + State.accessToken }
+          headers: { Authorization: 'Bearer ' + State.accessToken },
+          signal: ctrl.signal
         });
         if (!res.ok) return null;
         return await res.json();
-      } catch { return null; }
+      } catch (e) {
+        console.warn('[Auth] fetchUserInfo failed:', e && e.message);
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
     },
 
     // Sign out — revoke token and clear cache
@@ -366,13 +415,17 @@
       });
     },
 
-    // List files inside a category folder.
-    async listFiles(categoryFolderId) {
+    // List the contents of any folder (subfolders + files).
+    // Returns { folders: [...], files: [...] } already split by mime type.
+    async listFolderContents(folderId) {
       const q = encodeURIComponent(
-        `'${categoryFolderId}' in parents and trashed=false ` +
-        `and (mimeType='application/pdf' or mimeType contains 'image/')`
+        `'${folderId}' in parents and trashed=false and (` +
+          `mimeType='application/vnd.google-apps.folder' or ` +
+          `mimeType='application/pdf' or ` +
+          `mimeType contains 'image/'` +
+        `)`
       );
-      const fields = 'files(id,name,mimeType,size,modifiedTime,createdTime,thumbnailLink,iconLink,webViewLink),nextPageToken';
+      const fields = 'files(id,name,mimeType,size,modifiedTime,createdTime,thumbnailLink,iconLink,webViewLink,description),nextPageToken';
       let all = [];
       let pageToken = null;
       do {
@@ -382,7 +435,44 @@
         all = all.concat(res.files || []);
         pageToken = res.nextPageToken;
       } while (pageToken);
-      return all;
+      const folders = [];
+      const files = [];
+      for (const f of all) {
+        if (f.mimeType === 'application/vnd.google-apps.folder') folders.push(f);
+        else files.push(f);
+      }
+      // Folders alphabetical, files newest first
+      folders.sort((a, b) => a.name.localeCompare(b.name, 'he'));
+      files.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime));
+      return { folders, files };
+    },
+
+    // Backwards-compat shim — some old paths just want the file list.
+    async listFiles(folderId) {
+      const { files } = await this.listFolderContents(folderId);
+      return files;
+    },
+
+    // Create a plain subfolder under any parent. No metadata stored here —
+    // subfolders are organizational only. Categories (the top-level folders)
+    // store icon/color metadata via createCategoryFolder.
+    async createSubFolder(parentId, name) {
+      return await this._req('/files?fields=id,name,mimeType,modifiedTime,createdTime', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [parentId]
+        })
+      });
+    },
+
+    // Rename any folder (subfolder or category — for category use renameCategoryFolder so metadata is preserved).
+    async renameFolder(folderId, name) {
+      return await this._req(`/files/${folderId}?fields=id,name`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name })
+      });
     },
 
     // Upload a file (multipart). Returns the new file metadata.
@@ -428,38 +518,69 @@
     // Download file content as Blob (for viewing PDFs / images in-app)
     async downloadFileBlob(fileId) {
       await Auth.ensureToken();
-      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-        headers: { Authorization: 'Bearer ' + State.accessToken }
-      });
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
-      return await res.blob();
+      // 45s safety timeout so the UI never hangs forever on a stalled connection
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort('timeout'), 45000);
+      try {
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+          headers: { Authorization: 'Bearer ' + State.accessToken },
+          signal: ctrl.signal
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => '');
+          throw new Error(`Download failed (${res.status}): ${txt.slice(0, 200)}`);
+        }
+        return await res.blob();
+      } finally {
+        clearTimeout(timer);
+      }
     },
 
     // Internal request helper — auto-attaches token and refreshes on 401.
     async _req(path, opts = {}) {
       await Auth.ensureToken();
-      const init = {
-        method: opts.method || 'GET',
-        headers: {
-          'Authorization': 'Bearer ' + State.accessToken,
-          'Content-Type': 'application/json',
-          ...(opts.headers || {})
-        },
-        body: opts.body
-      };
       const url = path.startsWith('http')
         ? path
         : 'https://www.googleapis.com/drive/v3' + path;
-      let res = await fetch(url, init);
+      const doFetch = async () => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort('timeout'), 15000);
+        try {
+          return await fetch(url, {
+            method: opts.method || 'GET',
+            headers: {
+              'Authorization': 'Bearer ' + State.accessToken,
+              'Content-Type': 'application/json',
+              ...(opts.headers || {})
+            },
+            body: opts.body,
+            signal: ctrl.signal
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      let res;
+      try {
+        res = await doFetch();
+      } catch (e) {
+        if (e && e.name === 'AbortError') {
+          throw new Error(`Drive API timeout: ${opts.method || 'GET'} ${url}`);
+        }
+        throw new Error(`Drive API network error: ${e.message || e}`);
+      }
       if (res.status === 401) {
         // Token might have expired between calls
         await Auth.requestToken(false);
-        init.headers.Authorization = 'Bearer ' + State.accessToken;
-        res = await fetch(url, init);
+        try {
+          res = await doFetch();
+        } catch (e) {
+          throw new Error(`Drive API retry failed: ${e.message || e}`);
+        }
       }
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Drive API ${res.status}: ${text}`);
+        const text = await res.text().catch(() => '');
+        throw new Error(`Drive API ${res.status}: ${text.slice(0, 200)}`);
       }
       if (res.status === 204) return null;
       return await res.json();
@@ -480,6 +601,9 @@
         if (el) el.classList.toggle('is-active', s === screenName);
       });
       this.activeScreen = screenName;
+      // Leaving the category screen for elsewhere → reset the folder path
+      // stack so a future openCategory starts from a clean state.
+      if (screenName !== 'category') State.folderPath = [];
       // Update bottom nav active state
       document.querySelectorAll('#bottom-nav .nav-btn').forEach(btn => {
         const target = btn.dataset.target;
@@ -518,14 +642,67 @@
       });
     },
 
+    // Open a top-level category. Resets the folder path stack to just this
+    // category and navigates into it. Subfolders are entered via enterFolder.
     async openCategory(categoryId) {
       const cat = State.categories.find(c => c.id === categoryId);
       if (!cat) return;
       State.currentCategoryId = categoryId;
       State.currentFilter = { type: 'all', search: '' };
+      State.folderPath = [{
+        id: cat.folderId,
+        name: cat.name,
+        icon: cat.icon,
+        color: cat.color,
+        isCategory: true
+      }];
+      await this._loadAndRenderCurrentFolder();
+    },
 
-      // Update header
-      document.getElementById('category-title').textContent = cat.name;
+    // Push a subfolder onto the path and load it.
+    async enterFolder(folder) {
+      if (!folder || !folder.id) return;
+      State.currentFilter = { type: 'all', search: '' };
+      State.folderPath.push({
+        id: folder.id,
+        name: folder.name,
+        isCategory: false
+      });
+      await this._loadAndRenderCurrentFolder();
+    },
+
+    // Pop one level off the folder path. If empty after pop, return to dashboard.
+    async goUp() {
+      State.folderPath.pop();
+      if (State.folderPath.length === 0) {
+        this.switchScreen('dashboard');
+        return;
+      }
+      State.currentFilter = { type: 'all', search: '' };
+      await this._loadAndRenderCurrentFolder();
+    },
+
+    currentFolder() {
+      return State.folderPath[State.folderPath.length - 1] || null;
+    },
+
+    // Refresh the header chrome + load contents of whatever folder is on top
+    // of the path. Uses cache first for snappy navigation.
+    async _loadAndRenderCurrentFolder() {
+      const cur = this.currentFolder();
+      if (!cur) return;
+
+      // Header: title is the current folder name. The back button shows the
+      // parent's name (one level up) — iOS pattern.
+      document.getElementById('category-title').textContent = cur.name;
+      const backBtn = document.getElementById('btn-back-from-category');
+      if (backBtn) {
+        const parentName = State.folderPath.length > 1
+          ? State.folderPath[State.folderPath.length - 2].name
+          : 'Documents';
+        const span = backBtn.querySelector('span');
+        if (span) span.textContent = parentName;
+      }
       const searchInput = document.getElementById('category-search');
       if (searchInput) searchInput.value = '';
       document.querySelectorAll('#filter-chips .chip').forEach(c =>
@@ -534,27 +711,36 @@
 
       this.switchScreen('category');
 
-      // Load — try cache first
-      const cacheKey = 'docs_' + cat.folderId;
-      const cached = Storage.getCache(cacheKey);
+      // Cache lookup keyed by the actual Drive folder id — works for both
+      // category roots and any nested subfolder.
+      const cacheKey = 'docs_' + cur.id;
+      const cached = Storage.getCache(cacheKey, CONFIG.CACHE_TTL);
       if (cached) {
-        State.documents[categoryId] = cached;
+        State.folderContents[cur.id] = cached;
+        if (State.folderPath.length === 1) State.documents[State.currentCategoryId] = cached.files;
         this.renderDocuments();
       } else {
         this.renderDocuments(true); // skeleton
       }
 
       try {
-        const files = await Drive.listFiles(cat.folderId);
-        State.documents[categoryId] = files;
-        Storage.setCache(cacheKey, files);
-        // Update count on the category badge
-        cat.count = files.length;
-        Storage.set('categories', State.categories);
+        const contents = await Drive.listFolderContents(cur.id);
+        State.folderContents[cur.id] = contents;
+        Storage.setCache(cacheKey, contents);
+
+        // Update the category badge count when we're at the category root
+        if (State.folderPath.length === 1) {
+          State.documents[State.currentCategoryId] = contents.files;
+          const cat = State.categories.find(c => c.id === State.currentCategoryId);
+          if (cat) {
+            cat.count = contents.files.length;
+            Storage.set('categories', State.categories);
+          }
+        }
         this.renderDocuments();
       } catch (err) {
         console.error(err);
-        Toast.show('Failed to load documents', 'error');
+        Toast.show('Failed to load contents', 'error');
       }
     },
 
@@ -562,18 +748,24 @@
       const list = document.getElementById('documents-list');
       const empty = document.getElementById('documents-empty');
       if (!list) return;
+      const cur = this.currentFolder();
       const cat = State.categories.find(c => c.id === State.currentCategoryId);
-      let files = State.documents[State.currentCategoryId] || [];
+      const contents = (cur && State.folderContents[cur.id]) || { folders: [], files: [] };
+      let files = contents.files || [];
+      let folders = contents.folders || [];
 
-      if (loading && files.length === 0) {
+      if (loading && files.length === 0 && folders.length === 0) {
         list.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-tertiary);font-size:14px;">Loading…</div>';
         empty.hidden = true;
         return;
       }
 
-      // Apply filters
+      // Apply filters (search applies to both folders and files; type chips only filter files)
       const f = State.currentFilter;
       const search = (f.search || '').toLowerCase().trim();
+      if (search) {
+        folders = folders.filter(fo => fo.name.toLowerCase().includes(search));
+      }
       files = files.filter(file => {
         if (search && !file.name.toLowerCase().includes(search)) return false;
         if (f.type === 'pdf' && file.mimeType !== 'application/pdf') return false;
@@ -584,17 +776,48 @@
         }
         return true;
       });
+      // When a non-"all" type filter is active, hide folders (they're not "PDFs" or "Images")
+      if (f.type !== 'all') folders = [];
 
       // Sort newest first
       files.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime));
 
-      if (files.length === 0) {
+      if (files.length === 0 && folders.length === 0) {
         list.innerHTML = '';
         empty.hidden = false;
         return;
       }
       empty.hidden = true;
       list.innerHTML = '';
+
+      // ----- FOLDERS first (if any) -----
+      folders.forEach(folder => {
+        const row = document.createElement('button');
+        row.className = 'folder-card';
+        row.dataset.id = folder.id;
+        row.innerHTML = `
+          <div class="folder-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" fill="currentColor" opacity="0.18"/>
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+          </div>
+          <div class="folder-info">
+            <div class="folder-name">${escapeHtml(folder.name)}</div>
+            <div class="folder-meta">Folder</div>
+          </div>
+          <div class="doc-chevron">›</div>
+        `;
+        row.addEventListener('click', () => UI.enterFolder(folder));
+        // Long-press / right-click → rename or delete this subfolder
+        row.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          UI.subfolderActions(folder);
+        });
+        list.appendChild(row);
+      });
+
+      // ----- FILES -----
       files.forEach(file => {
         const card = document.createElement('button');
         card.className = 'doc-card';
@@ -604,8 +827,6 @@
         const isPdf = file.mimeType === 'application/pdf';
         const tag = isPdf ? 'PDF' : (isImg ? 'IMG' : '');
 
-        // Use thumbnailLink if present (Google sometimes returns one). Add
-        // a size hint so it loads at the right resolution.
         const thumb = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+$/, '=s220') : '';
         const thumbStyle = thumb ? `background-image:url('${thumb}')` : '';
         const placeholder = isPdf ? '📄' : (isImg ? '🖼️' : '📁');
@@ -624,6 +845,40 @@
         card.addEventListener('click', () => Modals.openViewer(file, cat));
         list.appendChild(card);
       });
+    },
+
+    // Subfolder rename/delete (long-press or via the menu)
+    async subfolderActions(folder) {
+      const choice = prompt(
+        `"${folder.name}"\n\nType "rename" to rename, or "delete" to move this folder (and everything inside) to Drive trash.`,
+        ''
+      );
+      if (!choice) return;
+      const cur = this.currentFolder();
+      if (choice.toLowerCase() === 'rename') {
+        const name = prompt('New folder name:', folder.name);
+        if (!name || name === folder.name) return;
+        Loader.show('Renaming…');
+        try {
+          await Drive.renameFolder(folder.id, name.trim());
+          Storage.removeCache('docs_' + cur.id);
+          await this._loadAndRenderCurrentFolder();
+          Toast.show('Folder renamed', 'success');
+        } catch (e) {
+          Toast.show('Rename failed: ' + e.message, 'error');
+        } finally { Loader.hide(); }
+      } else if (choice.toLowerCase() === 'delete') {
+        if (!confirm(`Move "${folder.name}" and everything inside it to Drive trash?`)) return;
+        Loader.show('Deleting…');
+        try {
+          await Drive.deleteCategoryFolder(folder.id); // same trash mechanism
+          Storage.removeCache('docs_' + cur.id);
+          await this._loadAndRenderCurrentFolder();
+          Toast.show('Folder moved to trash', 'success');
+        } catch (e) {
+          Toast.show('Delete failed: ' + e.message, 'error');
+        } finally { Loader.hide(); }
+      }
     },
 
     renderSettingsCategories() {
@@ -821,6 +1076,14 @@
 
     // ----- Category action sheet (rename/delete from category page) ---
     openCategoryActions() {
+      // If we're inside a subfolder, the menu should operate on the current
+      // subfolder, not the root category. Use the simple subfolderActions
+      // prompt for that case.
+      if (State.folderPath.length > 1) {
+        const cur = this.currentFolder();
+        if (cur) this.subfolderActions(cur);
+        return;
+      }
       const cat = State.categories.find(c => c.id === State.currentCategoryId);
       if (!cat) return;
       Sheets.open('category-actions-sheet');
@@ -839,32 +1102,43 @@
       const modal = document.getElementById('viewer-modal');
       const title = document.getElementById('viewer-title');
       const body = document.getElementById('viewer-body');
-      title.textContent = file.name;
+      title.textContent = file.name || 'Document';
       body.innerHTML = `<div class="viewer-loading"><div class="loader-spinner" style="border-color:rgba(255,255,255,0.18);border-top-color:#fff"></div>Loading document…</div>`;
       modal.hidden = false;
       if (navigator.vibrate) navigator.vibrate(8);
+
+      console.log('[Viewer] opening file', { id: file.id, name: file.name, mimeType: file.mimeType, size: file.size });
 
       try {
         const blob = await Drive.downloadFileBlob(file.id);
         if (this.currentBlobUrl) URL.revokeObjectURL(this.currentBlobUrl);
         this.currentBlobUrl = URL.createObjectURL(blob);
         body.innerHTML = '';
-        if (file.mimeType.startsWith('image/')) {
+        const mime = file.mimeType || blob.type || '';
+        if (mime.startsWith('image/')) {
           const img = document.createElement('img');
           img.src = this.currentBlobUrl;
           img.alt = file.name;
           body.appendChild(img);
-        } else if (file.mimeType === 'application/pdf') {
+        } else if (mime === 'application/pdf') {
           const iframe = document.createElement('iframe');
           iframe.src = this.currentBlobUrl + '#view=FitH';
           iframe.title = file.name;
           body.appendChild(iframe);
         } else {
-          body.innerHTML = '<div class="viewer-loading">Preview not available for this file type.</div>';
+          // Unknown type — offer download instead of a blank screen
+          body.innerHTML = `<div class="viewer-loading">
+            Preview not available for <strong>${escapeHtml(mime || 'this file type')}</strong>.<br>
+            Use the download button above to save it.
+          </div>`;
         }
       } catch (err) {
-        console.error(err);
-        body.innerHTML = '<div class="viewer-loading">Could not load this file.</div>';
+        console.error('[Viewer] failed to load', err);
+        const reason = (err && err.message) ? err.message : String(err);
+        body.innerHTML = `<div class="viewer-loading">
+          <div style="font-weight:600;color:#ff6b6b;">Could not load this file</div>
+          <div style="font-size:12px;opacity:0.7;max-width:280px;text-align:center;">${escapeHtml(reason)}</div>
+        </div>`;
         Toast.show('Failed to load file', 'error');
       }
     },
@@ -894,14 +1168,21 @@
       Loader.show('Deleting…');
       try {
         await Drive.deleteFile(this.currentFile.id);
-        // Remove from state
-        const catId = State.currentCategoryId;
-        if (State.documents[catId]) {
-          State.documents[catId] = State.documents[catId].filter(f => f.id !== this.currentFile.id);
-          const cat = State.categories.find(c => c.id === catId);
-          if (cat) cat.count = State.documents[catId].length;
-          Storage.setCache('docs_' + cat.folderId, State.documents[catId]);
-          Storage.set('categories', State.categories);
+        // Remove from the current folder's cache + reload
+        const cur = UI.currentFolder();
+        if (cur) {
+          const contents = State.folderContents[cur.id];
+          if (contents) {
+            contents.files = (contents.files || []).filter(f => f.id !== this.currentFile.id);
+            Storage.setCache('docs_' + cur.id, contents);
+          }
+          // Update category count if we're at root
+          if (State.folderPath.length === 1 && contents) {
+            const cat = State.categories.find(c => c.id === State.currentCategoryId);
+            if (cat) cat.count = contents.files.length;
+            State.documents[State.currentCategoryId] = contents.files;
+            Storage.set('categories', State.categories);
+          }
         }
         UI.renderDocuments();
         UI.renderCategories();
@@ -978,15 +1259,11 @@
       try {
         if (UI.activeScreen === 'dashboard') {
           await App.loadCategories(true);
-        } else if (UI.activeScreen === 'category' && State.currentCategoryId) {
-          const cat = State.categories.find(c => c.id === State.currentCategoryId);
-          if (cat) {
-            const files = await Drive.listFiles(cat.folderId);
-            State.documents[cat.id] = files;
-            cat.count = files.length;
-            Storage.setCache('docs_' + cat.folderId, files);
-            Storage.set('categories', State.categories);
-            UI.renderDocuments();
+        } else if (UI.activeScreen === 'category') {
+          const cur = UI.currentFolder();
+          if (cur) {
+            Storage.removeCache('docs_' + cur.id);
+            await UI._loadAndRenderCurrentFolder();
           }
         }
         Toast.show('Updated', 'success', 1200);
@@ -1015,7 +1292,9 @@
       if (meta) meta.setAttribute('content', isDark ? '#000000' : '#f2f2f7');
     },
     init() {
-      const saved = Storage.get('theme') || 'system';
+      // Default to light if user hasn't picked a theme yet (matches the
+      // bright iOS aesthetic the app targets).
+      const saved = Storage.get('theme') || 'light';
       this.apply(saved);
       const sel = document.getElementById('theme-select');
       if (sel) {
@@ -1166,7 +1445,7 @@
 
       // Back buttons
       document.getElementById('btn-back-from-category').addEventListener('click', () =>
-        UI.switchScreen('dashboard'));
+        UI.goUp());
       document.getElementById('btn-back-from-settings').addEventListener('click', () =>
         UI.switchScreen('dashboard'));
 
@@ -1220,10 +1499,10 @@
 
       // FAB → open upload sheet
       document.getElementById('btn-fab-upload').addEventListener('click', () => {
-        const cat = State.categories.find(c => c.id === State.currentCategoryId);
-        if (cat) {
+        const cur = UI.currentFolder();
+        if (cur) {
           document.getElementById('upload-sheet-sub').textContent =
-            `Upload a PDF or photo to ${cat.name}.`;
+            `Add to "${cur.name}".`;
         }
         Sheets.open('upload-sheet');
       });
@@ -1237,18 +1516,40 @@
         Sheets.close('upload-sheet');
         document.getElementById('camera-input').click();
       });
+      // New subfolder
+      const btnNewFolder = document.getElementById('btn-new-folder');
+      if (btnNewFolder) btnNewFolder.addEventListener('click', async () => {
+        Sheets.close('upload-sheet');
+        const cur = UI.currentFolder();
+        if (!cur) return;
+        const name = prompt('Folder name:', '');
+        if (!name || !name.trim()) return;
+        Loader.show('Creating folder…');
+        try {
+          await Drive.createSubFolder(cur.id, name.trim());
+          Storage.removeCache('docs_' + cur.id);
+          await UI._loadAndRenderCurrentFolder();
+          Toast.show('Folder created', 'success');
+        } catch (err) {
+          console.error(err);
+          Toast.show('Failed to create folder', 'error');
+        } finally {
+          Loader.hide();
+        }
+      });
       document.getElementById('btn-pick-from-drive').addEventListener('click', async () => {
         Sheets.close('upload-sheet');
         Picker.open(async (docs) => {
-          // Picker returns existing files — copy them into our category folder.
-          const cat = State.categories.find(c => c.id === State.currentCategoryId);
-          if (!cat) return;
+          // Picker returns existing files — copy them into the CURRENT folder
+          // (could be a category root or a deeply nested subfolder).
+          const cur = UI.currentFolder();
+          if (!cur) return;
           for (const doc of docs) {
             try {
               Loader.show('Adding from Drive…');
               await Drive._req(`/files/${doc.id}/copy?fields=id`, {
                 method: 'POST',
-                body: JSON.stringify({ parents: [cat.folderId] })
+                body: JSON.stringify({ parents: [cur.id] })
               });
             } catch (err) {
               console.error(err);
@@ -1257,12 +1558,8 @@
               Loader.hide();
             }
           }
-          // Reload list
-          const files = await Drive.listFiles(cat.folderId);
-          State.documents[cat.id] = files;
-          cat.count = files.length;
-          Storage.setCache('docs_' + cat.folderId, files);
-          UI.renderDocuments();
+          Storage.removeCache('docs_' + cur.id);
+          await UI._loadAndRenderCurrentFolder();
           Toast.show('Files added', 'success');
         });
       });
@@ -1331,23 +1628,30 @@
     async _postSignIn() {
       Loader.show('Connecting to Drive…');
       try {
+        console.log('[Init] _postSignIn → fetching user profile');
         const profile = await Auth.fetchUserInfo();
+        console.log('[Init] user profile:', profile && profile.email);
         if (profile) {
           State.user = { email: profile.email, name: profile.name, picture: profile.picture };
           Storage.set('user', State.user);
           UI.renderUserInfo();
         }
+        console.log('[Init] ensuring root folder');
         await Drive.ensureRootFolder();
+        console.log('[Init] root folder OK:', State.rootFolderId);
+        console.log('[Init] loading categories');
         await this.loadCategories(false);
+        console.log('[Init] categories loaded:', State.categories.length);
 
         // Reveal app
         document.getElementById('screen-login').classList.remove('is-active');
         document.getElementById('app-shell').hidden = false;
         UI.switchScreen('dashboard');
         State.isInitialized = true;
+        console.log('[Init] dashboard ready');
       } catch (err) {
-        console.error(err);
-        Toast.show('Could not connect to Drive', 'error');
+        console.error('[Init] failed at:', err);
+        Toast.show(`Could not connect to Drive: ${err.message || err}`, 'error');
       } finally {
         Loader.hide();
       }
@@ -1424,11 +1728,12 @@
     // Upload selected files to current category
     // -----------------------------------------------------------------
     async _uploadFiles(files) {
-      const cat = State.categories.find(c => c.id === State.currentCategoryId);
-      if (!cat) { Toast.show('Choose a category first', 'error'); return; }
+      const cur = UI.currentFolder();
+      if (!cur) { Toast.show('Open a category first', 'error'); return; }
       const MAX_SIZE = 25 * 1024 * 1024; // 25 MB
       const VALID = ['application/pdf', 'image/jpeg', 'image/png'];
 
+      let anyUploaded = false;
       for (const file of files) {
         if (file.size > MAX_SIZE) {
           Toast.show(`${file.name} is too large (max 25 MB)`, 'error');
@@ -1440,26 +1745,11 @@
         }
         Loader.show(`Uploading ${file.name}…`);
         try {
-          const meta = await Drive.uploadFile(file, cat.folderId, (p) => {
+          await Drive.uploadFile(file, cur.id, (p) => {
             const t = document.getElementById('loader-text');
             if (t) t.textContent = `Uploading ${file.name} · ${Math.round(p * 100)}%`;
           });
-          // Add to local state
-          const filesArr = State.documents[cat.id] || [];
-          filesArr.unshift({
-            id: meta.id,
-            name: meta.name || file.name,
-            mimeType: meta.mimeType || file.type,
-            size: meta.size || file.size,
-            modifiedTime: meta.modifiedTime || new Date().toISOString(),
-            thumbnailLink: meta.thumbnailLink || null
-          });
-          State.documents[cat.id] = filesArr;
-          cat.count = filesArr.length;
-          Storage.setCache('docs_' + cat.folderId, filesArr);
-          Storage.set('categories', State.categories);
-          UI.renderDocuments();
-          UI.renderCategories();
+          anyUploaded = true;
           Toast.show(`${file.name} added`, 'success');
         } catch (err) {
           console.error(err);
@@ -1467,6 +1757,13 @@
         } finally {
           Loader.hide();
         }
+      }
+      if (anyUploaded) {
+        // Reload the current folder from Drive so the new file shows up with
+        // its real metadata (id, thumbnail, modifiedTime, etc).
+        Storage.removeCache('docs_' + cur.id);
+        await UI._loadAndRenderCurrentFolder();
+        UI.renderCategories();
       }
     }
   };
