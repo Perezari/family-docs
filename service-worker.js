@@ -1,17 +1,22 @@
 /* =====================================================================
    FAMILY DOCUMENTS — Service Worker
    ---------------------------------------------------------------------
-   Offline strategy:
-   • App shell (HTML/CSS/JS/manifest/icons) → cache-first
-   • Google API calls (drive/oauth2/identity)            → network-only
-   • Other GETs                                           → stale-while-revalidate
+   Strategy:
+   • Same-origin app code (HTML/CSS/JS/manifest)  → NETWORK-FIRST
+       Always fetch fresh from network if online; fall back to cache only
+       if offline. New deploys are picked up on the next page load with
+       no manual "Unregister" dance.
+   • Same-origin static assets (images/icons)     → cache-first
+       These rarely change and benefit from instant offline display.
+   • Google API calls                             → network-only
+   • Cross-origin GETs                            → stale-while-revalidate
    ===================================================================== */
 
-const VERSION = 'v1.3.2';
+const VERSION = 'v1.4.0';
 const SHELL_CACHE = `fdm-shell-${VERSION}`;
 const RUNTIME_CACHE = `fdm-runtime-${VERSION}`;
 
-// Files that make up the offline shell. Keep this list small and stable.
+// Files that make up the offline shell. Used only as offline fallback.
 const SHELL_ASSETS = [
   './',
   './index.html',
@@ -23,12 +28,16 @@ const SHELL_ASSETS = [
   './icons/icon-180.png'
 ];
 
+// File extensions for static assets (cache-first). Anything not matching
+// these is treated as app code and uses network-first.
+const STATIC_ASSET_EXT = /\.(png|jpe?g|gif|svg|webp|ico|woff2?|ttf)$/i;
+
 // ---- Install: pre-cache shell -----------------------------------------
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
       .then((cache) => cache.addAll(SHELL_ASSETS).catch(() => {}))
-      .then(() => self.skipWaiting())
+      .then(() => self.skipWaiting()) // activate immediately, don't wait
   );
 });
 
@@ -41,14 +50,14 @@ self.addEventListener('activate', (event) => {
           .filter((k) => k !== SHELL_CACHE && k !== RUNTIME_CACHE)
           .map((k) => caches.delete(k))
       ))
-      .then(() => self.clients.claim())
+      .then(() => self.clients.claim()) // take control of open pages
   );
 });
 
 // ---- Fetch -----------------------------------------------------------
 self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== 'GET') return; // only intercept GETs
+  if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
 
@@ -68,23 +77,43 @@ self.addEventListener('fetch', (event) => {
     return; // fall through to network
   }
 
-  // 2. Same-origin shell → cache-first
+  // 2. Same-origin
   if (url.origin === self.location.origin) {
-    event.respondWith(
-      caches.match(req).then((cached) => {
-        if (cached) return cached;
-        return fetch(req).then((res) => {
-          // Cache successful same-origin GETs in runtime cache
+    const isStatic = STATIC_ASSET_EXT.test(url.pathname);
+    if (isStatic) {
+      // Cache-first for icons/images (rarely change)
+      event.respondWith(
+        caches.match(req).then((cached) => {
+          if (cached) return cached;
+          return fetch(req).then((res) => {
+            if (res && res.status === 200 && res.type === 'basic') {
+              const copy = res.clone();
+              caches.open(RUNTIME_CACHE)
+                .then((c) => c.put(req, copy))
+                .catch(() => {});
+            }
+            return res;
+          }).catch(() => caches.match('./index.html'));
+        })
+      );
+    } else {
+      // NETWORK-FIRST for app code (HTML/CSS/JS/manifest). Updates
+      // ship instantly on next reload — no Unregister-and-clear dance.
+      event.respondWith(
+        fetch(req).then((res) => {
           if (res && res.status === 200 && res.type === 'basic') {
             const copy = res.clone();
             caches.open(RUNTIME_CACHE)
               .then((c) => c.put(req, copy))
-              .catch(() => { /* best-effort */ });
+              .catch(() => {});
           }
           return res;
-        }).catch(() => caches.match('./index.html'));
-      })
-    );
+        }).catch(() =>
+          // Offline → fall back to cache, then to index.html for SPA
+          caches.match(req).then((cached) => cached || caches.match('./index.html'))
+        )
+      );
+    }
     return;
   }
 
@@ -94,7 +123,7 @@ self.addEventListener('fetch', (event) => {
       cache.match(req).then((cached) => {
         const network = fetch(req).then((res) => {
           if (res && res.status === 200) {
-            cache.put(req, res.clone()).catch(() => { /* best-effort */ });
+            cache.put(req, res.clone()).catch(() => {});
           }
           return res;
         }).catch(() => cached);
@@ -104,7 +133,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// ---- Optional: respond to messages (e.g. force update) ---------------
+// ---- Messages from page (e.g. force update) ---------------------------
 self.addEventListener('message', (event) => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });

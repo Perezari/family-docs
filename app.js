@@ -23,7 +23,7 @@
 
   // App version — printed on load so we can verify the new code is actually
   // running and the browser hasn't served a stale cached copy.
-  const APP_VERSION = '1.3.2';
+  const APP_VERSION = '1.4.0';
   console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
 
   // ===================================================================
@@ -1435,15 +1435,50 @@
   };
 
   // ===================================================================
-  // PWA — service worker registration
+  // PWA — service worker registration with auto-update flow
   // ===================================================================
   const PWA = {
     register() {
       if (!('serviceWorker' in navigator)) return;
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('service-worker.js')
-          .then(reg => console.log('[PWA] Service worker registered', reg.scope))
-          .catch(err => console.warn('[PWA] SW registration failed', err));
+      window.addEventListener('load', async () => {
+        try {
+          const reg = await navigator.serviceWorker.register('service-worker.js');
+          console.log('[PWA] Service worker registered', reg.scope);
+
+          // Check for updates every time the page becomes visible (e.g.
+          // user comes back to the PWA from background) — picks up new
+          // deploys without requiring a hard reload.
+          document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+              reg.update().catch(() => {});
+            }
+          });
+
+          // When a new SW is found and finishes installing, tell it to
+          // skip the "waiting" phase and take over right away.
+          reg.addEventListener('updatefound', () => {
+            const installing = reg.installing;
+            if (!installing) return;
+            installing.addEventListener('statechange', () => {
+              if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('[PWA] new version installed — activating');
+                installing.postMessage('SKIP_WAITING');
+              }
+            });
+          });
+
+          // When the active SW changes, reload the page so the user gets
+          // the new code immediately. Guard with a flag so we don't loop.
+          let reloading = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (reloading) return;
+            reloading = true;
+            console.log('[PWA] controller changed — reloading for new version');
+            window.location.reload();
+          });
+        } catch (err) {
+          console.warn('[PWA] SW registration failed', err);
+        }
       });
     }
   };
