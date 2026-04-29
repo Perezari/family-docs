@@ -63,6 +63,8 @@
         <span>Sign in with Google</span>
       </button>
 
+      <button id="login-switch-account" class="login-switch" type="button" hidden>Use a different account</button>
+
       <p class="login-fineprint">We only request access to a single folder we create for you, called <strong>“Family Documents Manager”</strong>. Nothing else in your Drive is read.</p>
     </div>
   </section>
@@ -407,6 +409,11 @@
   <!-- Google Identity & API libraries -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
+
+  <!-- Optional: per-machine config that overrides placeholder credentials
+       in app.js. Add this file to .gitignore to keep your API keys out
+       of source control. The 404 if the file doesn't exist is harmless. -->
+  <script src="config.local.js" defer onerror="this.remove()"></script>
 
   <!-- App -->
   <script src="app.js" defer></script>

@@ -203,6 +203,20 @@ body.theme-dark {
   font-size: 16px;
   line-height: 1.45;
 }
+.login-switch {
+  margin-top: 16px;
+  background: transparent;
+  border: 0;
+  color: var(--blue);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+.login-switch:hover { background: var(--fill-tertiary); }
+.login-switch:active { transform: scale(0.97); }
 .btn-google {
   width: 100%;
   display: flex;

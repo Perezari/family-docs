@@ -23,24 +23,40 @@
 
   // App version — printed on load so we can verify the new code is actually
   // running and the browser hasn't served a stale cached copy.
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.1.2';
   console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
 
   // ===================================================================
   // CONFIG
   // -------------------------------------------------------------------
-  // ⚠️  IMPORTANT: Replace these placeholder values with your own
-  //     credentials from Google Cloud Console — see README.md.
+  // ⚠️  IMPORTANT: Do NOT commit real credentials here. Two options:
+  //
+  //   A) Quick path — paste your values below directly. If you push this
+  //      file to a public repo, GitHub will scan it and flag your API
+  //      key. Set HTTP-referrer + API restrictions on the key in Google
+  //      Cloud Console so a leaked key is harmless.
+  //
+  //   B) Recommended — keep these as placeholders, and create a
+  //      `config.local.js` next to this file (and add it to .gitignore):
+  //
+  //          window.FDM_CONFIG = {
+  //            GOOGLE_CLIENT_ID: '…',
+  //            GOOGLE_API_KEY:   '…',
+  //            GOOGLE_APP_ID:    '…'
+  //          };
+  //
+  //      Add `<script src="config.local.js"></script>` BEFORE app.js
+  //      in index.html. The values below will be overridden at runtime.
   // ===================================================================
   const CONFIG = {
     // OAuth 2.0 Web Client ID
-    GOOGLE_CLIENT_ID: '351448430343-515k9hq0lvfqd34j1472m5d83nl6bkj8.apps.googleusercontent.com',
+    GOOGLE_CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
 
     // API key — used only by the Google Picker
-    GOOGLE_API_KEY: 'AIzaSyDqdlaquRDu8HRqXmD59ZSdX6V6Jp2Ls90',
+    GOOGLE_API_KEY: 'YOUR_GOOGLE_API_KEY',
 
     // App ID (Google Cloud project number) — used by Picker
-    GOOGLE_APP_ID: '351448430343',
+    GOOGLE_APP_ID: 'YOUR_GOOGLE_APP_ID',
 
     // Scopes:
     // - drive.file → per-file Drive access for files we create or are picked
@@ -70,6 +86,14 @@
     // Cache TTL for category list / file metadata (ms)
     CACHE_TTL: 5 * 60 * 1000
   };
+
+  // Apply optional overrides from config.local.js (recommended for any
+  // public repo). Only the auth keys are overridable — defaults stay.
+  if (window.FDM_CONFIG) {
+    if (window.FDM_CONFIG.GOOGLE_CLIENT_ID) CONFIG.GOOGLE_CLIENT_ID = window.FDM_CONFIG.GOOGLE_CLIENT_ID;
+    if (window.FDM_CONFIG.GOOGLE_API_KEY)   CONFIG.GOOGLE_API_KEY   = window.FDM_CONFIG.GOOGLE_API_KEY;
+    if (window.FDM_CONFIG.GOOGLE_APP_ID)    CONFIG.GOOGLE_APP_ID    = window.FDM_CONFIG.GOOGLE_APP_ID;
+  }
 
   // ===================================================================
   // STATE
@@ -257,12 +281,15 @@
         if (!this.tokenClient) return reject(new Error('Auth not initialized'));
         // Safety timeout — if the popup is blocked or the user closes it
         // without GIS firing a callback, we fail loudly instead of hanging.
-        const timeoutMs = promptUser ? 90000 : 8000;
+        // Silent refresh gets a longer window because GIS sometimes takes
+        // up to ~12s to fail a hidden-iframe attempt in browsers with
+        // strict third-party-cookie policies (Brave, Safari).
+        const timeoutMs = promptUser ? 90000 : 15000;
         const timer = setTimeout(() => {
           reject(new Error(
             promptUser
               ? 'Sign-in popup did not respond within 90s. The popup may have been blocked — check the URL bar for a popup-blocked icon.'
-              : 'Silent token refresh timed out (8s).'
+              : 'silent_timeout'
           ));
         }, timeoutMs);
         this.tokenClient.callback = (resp) => {
@@ -1378,23 +1405,36 @@
       if (savedUser) State.user = savedUser;
       if (savedRoot) State.rootFolderId = savedRoot;
 
-      // Wait for Google libs to be ready, then attempt silent sign-in
+      // Wait for Google libs to be ready
       try {
         await Auth.waitForLibs();
-        if (savedUser) {
-          // Try silent token grab. If it fails, show login.
-          try {
-            await Auth.requestToken(false);
-            await this._postSignIn();
-            return;
-          } catch (e) {
-            console.log('Silent sign-in failed', e);
-          }
-        }
       } catch (err) {
         console.error('Lib init error', err);
+        return;
       }
-      // Fallback: show login screen (already active)
+
+      // No silent token refresh: modern browsers block popups that aren't
+      // triggered by a user click, and GIS's hidden-iframe fallback only
+      // works in environments with permissive third-party cookies. Instead,
+      // if we recognize the user from a previous session, show them a
+      // "Continue as <email>" button — clicking it counts as a user
+      // gesture and lets the OAuth popup proceed without a hitch.
+      if (savedUser) {
+        const btn = document.getElementById('btn-google-signin');
+        const span = btn ? btn.querySelector('span') : null;
+        if (span && savedUser.email) {
+          span.textContent = `Continue as ${savedUser.email}`;
+        }
+        const switchAccount = document.getElementById('login-switch-account');
+        if (switchAccount) {
+          switchAccount.hidden = false;
+          switchAccount.onclick = () => {
+            Storage.remove('user');
+            location.reload();
+          };
+        }
+      }
+      // Login screen is already active; user clicks the button to continue.
     },
 
     _bindEvents() {
