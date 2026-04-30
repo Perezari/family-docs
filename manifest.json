@@ -2,7 +2,7 @@
   "name": "Family Documents",
   "short_name": "Family Docs",
   "description": "Manage your family's important documents — securely stored in your own Google Drive.",
-  "start_url": "./index.html",
+  "start_url": "./index.html?fullscreen=true",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
