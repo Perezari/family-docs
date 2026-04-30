@@ -417,6 +417,31 @@
        of source control. The 404 if the file doesn't exist is harmless. -->
   <script src="config.local.js" defer onerror="this.remove()"></script>
 
+  <!-- Eruda: in-page DevTools for mobile debugging. Activated by:
+         (a) ?eruda=1 in the URL, or
+         (b) localStorage.fdm_debug = "1" being set
+       When active, a small floating button appears in the corner.
+       Tap it to open Console / Elements / Network just like F12. -->
+  <script>
+    (function () {
+      var url = new URL(location.href);
+      var enable = url.searchParams.get('eruda') === '1' ||
+                   localStorage.getItem('fdm_debug') === '1';
+      if (url.searchParams.get('eruda') === '1') {
+        localStorage.setItem('fdm_debug', '1'); // remember across reloads
+      }
+      if (url.searchParams.get('eruda') === '0') {
+        localStorage.removeItem('fdm_debug');
+        return;
+      }
+      if (!enable) return;
+      var s = document.createElement('script');
+      s.src = '//cdn.jsdelivr.net/npm/eruda';
+      s.onload = function () { window.eruda && eruda.init(); };
+      document.head.appendChild(s);
+    })();
+  </script>
+
   <!-- App -->
   <script src="app.js" defer></script>
 </body>
