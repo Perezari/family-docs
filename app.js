@@ -23,7 +23,7 @@
 
   // App version — printed on load so we can verify the new code is actually
   // running and the browser hasn't served a stale cached copy.
-  const APP_VERSION = '1.4.1';
+  const APP_VERSION = '1.4.2';
   console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
 
   // ===================================================================
@@ -1527,6 +1527,11 @@
   // ===================================================================
   const App = {
     async init() {
+      // Show version badge on login screen so we can verify deployed
+      // code at a glance — no need to open DevTools every time.
+      const v = document.getElementById('login-version');
+      if (v) v.textContent = 'v' + APP_VERSION;
+
       // Login screen is the initial state — paint the gradient on body+html
       // right away so there's no flash of plain gray during boot.
       document.documentElement.classList.add('login-active');

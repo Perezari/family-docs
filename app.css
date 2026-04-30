@@ -11,22 +11,22 @@
    layout-display value. */
 [hidden] { display: none !important; }
 
-/* When the login screen is active, paint the gradient on html + body too,
-   so any reveal beyond the screen element (iOS PWA safe-area, rubber-band
-   scroll, etc.) blends in seamlessly instead of showing a gray band.
-   Activated by the JS adding `body.login-active`. */
+/* When the login screen is active, paint a soft blue background on
+   html + body so any reveal beyond the screen element (iOS PWA safe-area,
+   rubber-band scroll, gradient drop-off zones) blends seamlessly with
+   the radial gradients instead of falling back to the gray --bg color. */
 html.login-active,
 body.login-active {
-  background:
-    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.18), transparent 60%),
-    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.20), transparent 55%),
-    var(--bg);
+  background-color: #e8f0fa;
+  background-image:
+    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.32), transparent 60%),
+    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.28), transparent 55%);
 }
 
 /* Defensive layer: a fixed full-screen pseudo-element painted *behind*
-   all content. Guarantees the gradient is visible edge-to-edge on every
-   browser, every PWA mode, every iOS quirk — even where html/body
-   background fails to paint into safe-area regions. */
+   all content. Guarantees the soft-blue background is visible edge-to-edge
+   on every browser, every PWA mode, every iOS quirk — even where
+   html/body background fails to paint into safe-area regions. */
 body.login-active::before {
   content: '';
   position: fixed;
@@ -36,10 +36,10 @@ body.login-active::before {
   height: 100dvh;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.18), transparent 60%),
-    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.20), transparent 55%),
-    var(--bg);
+  background-color: #e8f0fa;
+  background-image:
+    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.32), transparent 60%),
+    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.28), transparent 55%);
 }
 
 html, body {
@@ -276,6 +276,14 @@ body.theme-dark {
   font-size: 13px;
   color: var(--text-tertiary);
   line-height: 1.45;
+}
+.login-version {
+  margin-top: 16px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+  letter-spacing: 0.05em;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ============================================================
@@ -652,9 +660,8 @@ body.theme-dark {
   left: 0; right: 0; bottom: 0;
   display: flex;
   justify-content: space-around;
-  /* Tight padding — the nav itself is short. Bottom uses safe-area to
-     leave room for iOS home indicator without pushing icons up. */
-  padding: 0 8px max(env(safe-area-inset-bottom), 6px);
+  /* Top padding tight; bottom uses the iPhone home-indicator safe-area */
+  padding: 6px 8px max(env(safe-area-inset-bottom), 6px);
   background: var(--bg-blur);
   -webkit-backdrop-filter: saturate(180%) blur(28px);
   backdrop-filter: saturate(180%) blur(28px);
@@ -669,15 +676,15 @@ body.theme-dark {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  padding: 6px 4px 4px;
+  gap: 3px;
+  padding: 4px 4px;
   color: var(--text-tertiary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: color 0.15s ease, transform 0.15s ease;
 }
-.nav-btn svg { width: 24px; height: 24px; }
+.nav-btn svg { width: 26px; height: 26px; }
 .nav-btn:active { transform: scale(0.92); }
 .nav-btn.is-active { color: var(--blue); }
 
