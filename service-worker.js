@@ -12,7 +12,7 @@
    • Cross-origin GETs                            → stale-while-revalidate
    ===================================================================== */
 
-const VERSION = 'v1.5.3';
+const VERSION = 'v1.5.4';
 const SHELL_CACHE = `fdm-shell-${VERSION}`;
 const RUNTIME_CACHE = `fdm-runtime-${VERSION}`;
 

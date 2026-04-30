@@ -204,6 +204,7 @@ body.theme-dark {
 .screen-login {
   /* Background is painted by body.login-active::before (fixed full-screen
      layer). Keep this transparent so we don't double-up. */
+  background: transparent;
   align-items: center;
   justify-content: center;
   padding: max(env(safe-area-inset-top), 24px) 24px max(env(safe-area-inset-bottom), 24px);
@@ -659,8 +660,13 @@ body.theme-dark {
   left: 0; right: 0; bottom: 0;
   display: flex;
   justify-content: space-around;
-  /* Top padding tight; bottom uses the iPhone home-indicator safe-area */
-  padding: 6px 8px max(env(safe-area-inset-bottom), 6px);
+  /* Tight bottom — icons sit just above the home indicator instead of
+     leaving the full ~34px safe-area as empty space. iOS still reserves
+     the home-indicator zone via the visible nav-blur extending into it. */
+  padding: 6px 8px 8px;
+  /* Add the safe-area as MARGIN below content area instead, so the
+     blurred bar background extends to the screen edge. */
+  padding-bottom: calc(env(safe-area-inset-bottom) * 0.4 + 8px);
   background: var(--bg-blur);
   -webkit-backdrop-filter: saturate(180%) blur(28px);
   backdrop-filter: saturate(180%) blur(28px);
