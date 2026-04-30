@@ -652,21 +652,19 @@ body.theme-dark {
 .fab:active { transform: scale(0.92); }
 
 /* ============================================================
-   BOTTOM NAVIGATION (frosted glass)
+   BOTTOM NAVIGATION (frosted glass) - NATIVE FIX
    ============================================================ */
 .bottom-nav {
-  position: absolute;
+  position: fixed; /* שונה מ-absolute כדי להינעל לתחתית המסך */
   left: 0; right: 0; bottom: 0;
   display: flex;
   justify-content: space-around;
-  /* Tight bottom — icons sit just above the home indicator instead of
-     leaving the full ~34px safe-area as empty space. iOS still reserves
-     the home-indicator zone via the visible nav-blur extending into it. */
-  padding: 6px 8px 8px;
-  /* Add the safe-area as MARGIN below content area instead, so the
-     blurred bar background extends to the screen edge. */
-  padding-bottom: calc(env(safe-area-inset-bottom) * 0.4 + 8px);
-  background: var(--bg-blur);
+  padding: 12px 8px; /* ריווח נקי ואחיד מסביב לאייקונים */
+  
+  /* מוודא שהתפריט צמוד למטה. משתמש ב-max כדי להגן על האייקונים 
+     באייפונים עם פס בית, בלי להוסיף שטח אפור מוגזם */
+  padding-bottom: max(12px, env(safe-area-inset-bottom)); 
+  
   -webkit-backdrop-filter: saturate(180%) blur(28px);
   backdrop-filter: saturate(180%) blur(28px);
   border-top: 0.5px solid var(--separator);
