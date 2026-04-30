@@ -11,28 +11,20 @@
    layout-display value. */
 [hidden] { display: none !important; }
 
-/* When the login screen is active, paint a soft blue background on
-   html + body so any reveal beyond the screen element (iOS PWA safe-area,
-   rubber-band scroll, gradient drop-off zones) blends seamlessly with
-   the radial gradients instead of falling back to the gray --bg color.
-   `background-attachment: fixed` anchors the gradient to the viewport
-   so it always covers the full visible area regardless of body height
-   miscalculations on iOS PWA standalone. */
+/* When the login screen is active, paint a subtle gray-blue tint on
+   html + body. The gray base matches var(--bg) (and theme-color), so
+   iOS PWA's safe-area regions blend in seamlessly with the page. */
 html.login-active,
 body.login-active {
-  background-color: #e8f0fa;
+  background-color: var(--bg);
   background-image:
-    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.32), transparent 60%),
-    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.28), transparent 55%),
-    radial-gradient(80% 60% at 100% 100%, rgba(120, 180, 240, 0.22), transparent 70%);
-  background-attachment: fixed;
-  background-size: 100% 100%;
+    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.10), transparent 60%),
+    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.10), transparent 55%);
 }
 
 /* Defensive layer: a fixed full-screen pseudo-element painted *behind*
-   all content. Guarantees the soft-blue background is visible edge-to-edge
-   on every browser, every PWA mode, every iOS quirk — even where
-   html/body background fails to paint into safe-area regions. */
+   all content. Guarantees the background is visible edge-to-edge on
+   every browser, every PWA mode. */
 body.login-active::before {
   content: '';
   position: fixed;
@@ -42,11 +34,10 @@ body.login-active::before {
   height: 100dvh;
   z-index: -1;
   pointer-events: none;
-  background-color: #e8f0fa;
+  background-color: var(--bg);
   background-image:
-    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.32), transparent 60%),
-    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.28), transparent 55%),
-    radial-gradient(80% 60% at 100% 100%, rgba(120, 180, 240, 0.22), transparent 70%);
+    radial-gradient(120% 80% at 80% 0%, rgba(90, 200, 250, 0.10), transparent 60%),
+    radial-gradient(100% 70% at 0% 100%, rgba(0, 122, 255, 0.10), transparent 55%);
 }
 
 html, body {
@@ -59,10 +50,9 @@ html, body {
   text-rendering: optimizeLegibility;
 }
 /* Make html itself opaque with our base color so iOS PWA's safe-area
-   region (home bar) blends in seamlessly instead of showing white.
-   This is overridden when login-active is set. */
+   region (home bar) blends in seamlessly. */
 html { background-color: var(--bg); }
-html.login-active { background-color: #e8f0fa; }
+html.login-active { background-color: var(--bg); }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
                "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
@@ -77,7 +67,7 @@ body {
   min-height: 100dvh;
   height: 100dvh;
 }
-body.login-active { background-color: #e8f0fa; }
+body.login-active { background-color: var(--bg); }
 button { font-family: inherit; }
 input, select, textarea { font-family: inherit; font-size: inherit; }
 input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; }
