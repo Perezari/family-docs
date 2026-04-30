@@ -204,7 +204,6 @@ body.theme-dark {
 .screen-login {
   /* Background is painted by body.login-active::before (fixed full-screen
      layer). Keep this transparent so we don't double-up. */
-  background: transparent;
   align-items: center;
   justify-content: center;
   padding: max(env(safe-area-inset-top), 24px) 24px max(env(safe-area-inset-bottom), 24px);
