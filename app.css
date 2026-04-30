@@ -665,6 +665,7 @@ body.theme-dark {
      באייפונים עם פס בית, בלי להוסיף שטח אפור מוגזם */
   padding-bottom: max(12px, env(safe-area-inset-bottom)); 
   
+  background: var(--bg-blur);
   -webkit-backdrop-filter: saturate(180%) blur(28px);
   backdrop-filter: saturate(180%) blur(28px);
   border-top: 0.5px solid var(--separator);
