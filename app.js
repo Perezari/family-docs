@@ -23,7 +23,7 @@
 
   // App version — printed on load so we can verify the new code is actually
   // running and the browser hasn't served a stale cached copy.
-  const APP_VERSION = '1.5.1';
+  const APP_VERSION = '1.5.2';
   console.log(`%c[FamilyDocs] app.js v${APP_VERSION} loaded`, 'color:#007aff;font-weight:600');
 
   // ===================================================================
@@ -1531,6 +1531,25 @@
       // code at a glance — no need to open DevTools every time.
       const v = document.getElementById('login-version');
       if (v) v.textContent = 'v' + APP_VERSION;
+
+      // ─── iOS PWA fullscreen kick ───────────────────────────────────
+      // On iOS, when a PWA is opened from the home screen, the
+      // apple-mobile-web-app-status-bar-style meta tag isn't always
+      // honored on the FIRST load — iOS keeps a "regular standalone"
+      // chrome (white status bar + opaque safe-area band at bottom)
+      // until the page navigates once. Doing a single auto-reload
+      // forces iOS to re-evaluate and properly enter the translucent
+      // mode where the page background bleeds edge-to-edge.
+      // We track this via sessionStorage so it only fires once per
+      // PWA launch (sessionStorage clears when the PWA is closed).
+      const isStandalone = window.navigator.standalone === true ||
+                           window.matchMedia('(display-mode: standalone)').matches;
+      if (isStandalone && !sessionStorage.getItem('fdm_kicked')) {
+        sessionStorage.setItem('fdm_kicked', '1');
+        // Use replace() so the reload doesn't add a history entry
+        location.replace(location.href);
+        return; // stop init — page is reloading
+      }
 
       // Login screen is the initial state — paint the gradient on body+html
       // right away so there's no flash of plain gray during boot.
