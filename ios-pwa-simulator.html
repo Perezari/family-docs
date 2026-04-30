@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>iOS PWA Simulator</title>
+<style>
+  :root {
+    --bg: #1c1c1e;
+    --panel: #2c2c2e;
+    --panel-2: #3a3a3c;
+    --text: #ffffff;
+    --text-2: #98989e;
+    --accent: #0a84ff;
+    --separator: #38383a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Top toolbar ─── */
+  .toolbar {
+    background: var(--panel);
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--separator);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+  }
+  .toolbar h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .toolbar .group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .toolbar label {
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .toolbar input[type="text"], .toolbar select {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    min-width: 240px;
+  }
+  .toolbar input[type="text"] { min-width: 360px; flex: 1; }
+  .toolbar button {
+    background: var(--accent);
+    color: white;
+    border: 0;
+    border-radius: 8px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .toolbar button.secondary {
+    background: var(--panel-2);
+    color: var(--text);
+  }
+  .toolbar button:active { opacity: 0.7; }
+
+  /* ─── Stage / device frame ─── */
+  .stage {
+    padding: 32px 20px 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .device {
+    /* iPhone 14 Pro physical dimensions (CSS pixels):
+       Viewport: 393 × 852, with 47px notch + 34px home indicator. */
+    position: relative;
+    width: 423px;            /* device width incl bezel */
+    height: 882px;           /* device height incl bezel */
+    background: #1d1d1f;
+    border-radius: 56px;
+    box-shadow:
+      0 0 0 2px #2a2a2c,
+      0 0 0 4px #4a4a4c,
+      0 30px 80px rgba(0,0,0,0.6),
+      0 12px 30px rgba(0,0,0,0.4);
+    padding: 15px;
+  }
+  /* Side buttons */
+  .device::before {
+    content: '';
+    position: absolute;
+    left: -3px;
+    top: 180px;
+    width: 4px;
+    height: 32px;
+    background: #4a4a4c;
+    border-radius: 2px 0 0 2px;
+    box-shadow:
+      0 50px 0 #4a4a4c,
+      0 50px 0 0 #4a4a4c,
+      0 90px 0 -7px transparent;
+  }
+  .device::after {
+    content: '';
+    position: absolute;
+    right: -3px;
+    top: 220px;
+    width: 4px;
+    height: 80px;
+    background: #4a4a4c;
+    border-radius: 0 2px 2px 0;
+  }
+
+  .screen {
+    position: relative;
+    width: 393px;
+    height: 852px;
+    background: #000;
+    border-radius: 42px;
+    overflow: hidden;
+  }
+
+  /* Dynamic island (47×38 at top) */
+  .dynamic-island {
+    position: absolute;
+    top: 11px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 126px;
+    height: 38px;
+    background: #000;
+    border-radius: 19px;
+    z-index: 100;
+    pointer-events: none;
+  }
+
+  /* Status bar — iOS chrome that overlays the page in PWA mode */
+  .status-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 59px;          /* iPhone 14 Pro safe-area-inset-top */
+    z-index: 99;
+    pointer-events: none;
+    padding: 0 30px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding-top: 18px;
+    transition: background 0.2s ease;
+  }
+  .status-bar .time {
+    font-size: 16px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.02em;
+    transition: color 0.2s ease;
+  }
+  .status-bar .icons {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .status-bar svg { fill: #fff; transition: fill 0.2s ease; }
+
+  /* Status bar styles (controlled by toolbar) */
+  .status-bar.style-default {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+  }
+  .status-bar.style-default .time { color: #000; }
+  .status-bar.style-default svg { fill: #000; }
+  .status-bar.style-default ~ .iframe-wrap { top: 59px; }
+
+  .status-bar.style-translucent { background: transparent; }
+  .status-bar.style-translucent .time { color: #000; }
+  .status-bar.style-translucent svg { fill: #000; }
+
+  .status-bar.style-translucent.dark .time { color: #fff; }
+  .status-bar.style-translucent.dark svg { fill: #fff; }
+
+  /* Home indicator at bottom (34px safe-area) */
+  .home-indicator {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 134px;
+    height: 5px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 3px;
+    z-index: 99;
+    pointer-events: none;
+  }
+  .home-indicator.light { background: rgba(255, 255, 255, 0.7); }
+
+  /* The "safe area bottom" where iOS paints theme-color in standalone */
+  .safe-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 34px;
+    z-index: 98;
+    pointer-events: none;
+    transition: background 0.2s ease;
+  }
+
+  /* The iframe that hosts the PWA itself */
+  .iframe-wrap {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow: hidden;
+  }
+  .iframe-wrap iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: white;
+  }
+
+  /* ─── Info / disclaimer ─── */
+  .info {
+    max-width: 720px;
+    background: var(--panel);
+    border: 1px solid var(--separator);
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-2);
+  }
+  .info strong { color: var(--text); }
+  .info code {
+    background: var(--panel-2);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, SF Mono, Menlo, monospace;
+    color: #ffd479;
+    font-size: 12px;
+  }
+  .info ul { margin: 8px 0; padding-left: 20px; }
+  .info li { margin-bottom: 4px; }
+  .warning {
+    background: rgba(255, 159, 10, 0.12);
+    border-color: rgba(255, 159, 10, 0.4);
+    color: #ffb340;
+  }
+  .warning strong { color: #ffd479; }
+</style>
+</head>
+<body>
+
+<header class="toolbar">
+  <h1>iOS PWA Simulator</h1>
+  <div class="group">
+    <label>URL</label>
+    <input type="text" id="url-input" placeholder="https://perezari.github.io/family-docs/index.html"
+           value="https://perezari.github.io/family-docs/index.html" />
+    <button id="btn-load">Load</button>
+  </div>
+  <div class="group">
+    <label>Status bar</label>
+    <select id="status-style">
+      <option value="default">default (white)</option>
+      <option value="translucent" selected>black-translucent (overlay)</option>
+      <option value="black">black</option>
+    </select>
+  </div>
+  <div class="group">
+    <label>Theme color</label>
+    <input type="color" id="theme-color" value="#e8f0fa" style="min-width:auto;padding:0;width:38px;height:30px;cursor:pointer" />
+  </div>
+  <div class="group">
+    <button class="secondary" id="btn-toggle-chrome">Hide chrome</button>
+  </div>
+</header>
+
+<div class="stage">
+  <div class="device">
+    <div class="screen" id="screen">
+      <div class="dynamic-island"></div>
+      <div class="status-bar style-translucent" id="status-bar">
+        <div class="time">9:41</div>
+        <div class="icons">
+          <!-- Signal -->
+          <svg width="18" height="11" viewBox="0 0 18 11"><rect x="0" y="7" width="3" height="4" rx="0.5"/><rect x="5" y="5" width="3" height="6" rx="0.5"/><rect x="10" y="2" width="3" height="9" rx="0.5"/><rect x="15" y="0" width="3" height="11" rx="0.5"/></svg>
+          <!-- Wifi -->
+          <svg width="16" height="11" viewBox="0 0 16 11"><path d="M8 0C5.2 0 2.6 1 0.6 2.7l1.3 1.5C3.5 2.7 5.7 1.8 8 1.8s4.5 0.9 6.1 2.4l1.3-1.5C13.4 1 10.8 0 8 0zM8 3.6c-1.9 0-3.6 0.7-5 1.8l1.4 1.6C5.5 6.2 6.7 5.7 8 5.7s2.5 0.5 3.6 1.3l1.4-1.6c-1.4-1.1-3.1-1.8-5-1.8zM8 7.3c-1 0-2 0.4-2.7 1L8 11l2.7-2.7c-0.7-0.6-1.7-1-2.7-1z"/></svg>
+          <!-- Battery -->
+          <svg width="27" height="13" viewBox="0 0 27 13"><rect x="0.5" y="0.5" width="22" height="12" rx="3" fill="none" stroke-width="1" stroke="currentColor" style="stroke:inherit;fill:none;opacity:0.4"/><rect x="2" y="2" width="19" height="9" rx="1.5"/><rect x="23.5" y="4" width="2" height="5" rx="1"/></svg>
+        </div>
+      </div>
+      <div class="iframe-wrap" id="iframe-wrap">
+        <iframe id="iframe" src="about:blank"></iframe>
+      </div>
+      <div class="safe-bottom" id="safe-bottom"></div>
+      <div class="home-indicator light" id="home-indicator"></div>
+    </div>
+  </div>
+
+  <div class="info warning">
+    <strong>⚠️ Important limitation:</strong> This simulator runs your PWA inside an iframe in your desktop browser (Brave/Chrome — Blink engine). It mimics the iOS PWA <em>frame</em> — status bar, home indicator, safe-area regions — but cannot reproduce <strong>WebKit-specific bugs</strong> like the iOS-PWA-only "gray band" issue we hit earlier. For those, use Safari Web Inspector on a real iPhone connected to a Mac. Use this tool for layout, theme-color, and safe-area work.
+  </div>
+
+  <div class="info">
+    <strong>What this simulator shows:</strong>
+    <ul>
+      <li><strong>Status bar styles</strong> — toggle between <code>default</code>, <code>black-translucent</code> and <code>black</code> to see how each affects the top region.</li>
+      <li><strong>Theme color</strong> — paints both the status bar (when <code>default</code>) and the bottom safe-area region around the home indicator. Pick a color that matches your page background to avoid visible bands.</li>
+      <li><strong>Safe-area regions</strong> — the top 59px (under the status bar/notch) and bottom 34px (around the home indicator) reserve space for iOS chrome. Your CSS should use <code>env(safe-area-inset-top)</code> / <code>env(safe-area-inset-bottom)</code> to handle these.</li>
+    </ul>
+    <strong>Tip:</strong> Open this page's DevTools (F12) and use Inspect Element on the iframe to debug your PWA's CSS just like in real iOS. Most layout issues are visible here, except for true WebKit bugs.
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const iframe = $('iframe');
+  const urlInput = $('url-input');
+  const statusBar = $('status-bar');
+  const safeBottom = $('safe-bottom');
+  const themeColorInput = $('theme-color');
+  const homeIndicator = $('home-indicator');
+
+  function loadUrl() {
+    let url = urlInput.value.trim();
+    if (!url) return;
+    if (!/^https?:/.test(url)) url = 'https://' + url;
+    iframe.src = url;
+  }
+
+  $('btn-load').addEventListener('click', loadUrl);
+  urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadUrl(); });
+
+  function applyStatusStyle() {
+    const style = $('status-style').value;
+    statusBar.classList.remove('style-default', 'style-translucent', 'style-black', 'dark');
+    if (style === 'default') {
+      statusBar.classList.add('style-default');
+    } else if (style === 'translucent') {
+      statusBar.classList.add('style-translucent');
+    } else {
+      statusBar.classList.add('style-translucent', 'dark');
+      statusBar.style.background = '#000';
+    }
+    if (style !== 'black') statusBar.style.background = '';
+  }
+  $('status-style').addEventListener('change', applyStatusStyle);
+
+  function applyThemeColor() {
+    const c = themeColorInput.value;
+    safeBottom.style.background = c;
+    // When status-bar is "default" mode, it's painted with theme color too
+    if ($('status-style').value === 'default') {
+      statusBar.style.background = c;
+    }
+    // Auto-pick light/dark home indicator based on color luminance
+    const m = /^#([0-9a-f]{6})$/i.exec(c);
+    if (m) {
+      const r = parseInt(m[1].slice(0,2), 16);
+      const g = parseInt(m[1].slice(2,4), 16);
+      const b = parseInt(m[1].slice(4,6), 16);
+      const lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+      homeIndicator.classList.toggle('light', lum < 0.5);
+    }
+  }
+  themeColorInput.addEventListener('input', applyThemeColor);
+
+  let chromeHidden = false;
+  $('btn-toggle-chrome').addEventListener('click', () => {
+    chromeHidden = !chromeHidden;
+    statusBar.style.display = chromeHidden ? 'none' : '';
+    safeBottom.style.display = chromeHidden ? 'none' : '';
+    homeIndicator.style.display = chromeHidden ? 'none' : '';
+    document.getElementById('btn-toggle-chrome').textContent =
+      chromeHidden ? 'Show chrome' : 'Hide chrome';
+  });
+
+  // Try to read theme-color from the loaded page and apply it automatically
+  iframe.addEventListener('load', () => {
+    try {
+      const doc = iframe.contentDocument;
+      if (!doc) return;
+      const meta = doc.querySelector('meta[name="theme-color"]');
+      if (meta && meta.content) {
+        themeColorInput.value = meta.content;
+        applyThemeColor();
+      }
+    } catch (e) {
+      // Cross-origin — can't read. Not an error.
+    }
+  });
+
+  // Initial render
+  applyStatusStyle();
+  applyThemeColor();
+  loadUrl();
+</script>
+</body>
+</html>
